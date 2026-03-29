@@ -1,0 +1,36 @@
+{
+  "format_version": "1.16.100",
+  "minecraft:cave_carver_feature": {
+    "description": {
+      "identifier": "minecraft:underground_cave_carver_feature"
+    },
+
+    "fill_with": "minecraft:air",
+
+    "width_modifier": 0.1,
+    // ↑ จาก 0.0 → 0.1
+    // เพิ่มความกว้างเล็กน้อย (~5-10%)
+
+    "skip_carve_chance": 28,
+    // ↓ จาก 33 → 28
+    // เพิ่มจำนวนถ้ำ ~5%
+
+    "y_scale": [0.15, 0.95],
+    // ↑ จาก [0.1, 0.9]
+    // ดันขึ้นใกล้ผิวเล็กน้อย (ไม่ aggressive)
+
+    "height_limit": 236,
+    // คงเดิม (ยัง balance ดีอยู่)
+
+    "horizontal_radius_multiplier": [0.8, 1.5],
+    // ↑ จาก [0.7, 1.4]
+    // กว้างขึ้นเล็กน้อย → มองเห็นง่ายขึ้น
+
+    "vertical_radius_multiplier": [0.9, 1.4],
+    // ↑ จาก [0.8, 1.3]
+    // สูงขึ้นนิดเดียว → โอกาสทะลุผิวเพิ่มเล็กน้อย
+
+    "floor_level": [-0.95, -0.35]
+    // ↑ ปรับเล็กน้อย → พื้นไม่ลึกเกิน
+  }
+}

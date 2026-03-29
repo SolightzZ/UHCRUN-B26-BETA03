@@ -1,0 +1,267 @@
+{
+  "format_version": "1.26.0",
+  "minecraft:entity": {
+    "description": {
+      "identifier": "minecraft:player",
+      "is_summonable": false,
+      "is_spawnable": false,
+      "spawn_category": "creature"
+    },
+    "components": {
+      "minecraft:attack": {
+        "damage": 1
+      },
+      "minecraft:block_climber": {},
+      "minecraft:damage_sensor": {
+        "triggers": [
+          {
+            "on_damage": {
+              "filters": {
+                "any_of": [
+                  {
+                    "all_of": [
+                      {
+                        "test": "has_tag",
+                        "subject": "self",
+                        "value": "team1"
+                      },
+                      {
+                        "test": "has_tag",
+                        "subject": "other",
+                        "value": "team1"
+                      }
+                    ]
+                  },
+                  {
+                    "all_of": [
+                      {
+                        "test": "has_tag",
+                        "subject": "self",
+                        "value": "team2"
+                      },
+                      {
+                        "test": "has_tag",
+                        "subject": "other",
+                        "value": "team2"
+                      }
+                    ]
+                  },
+                  {
+                    "all_of": [
+                      {
+                        "test": "has_tag",
+                        "subject": "self",
+                        "value": "team3"
+                      },
+                      {
+                        "test": "has_tag",
+                        "subject": "other",
+                        "value": "team3"
+                      }
+                    ]
+                  },
+                  {
+                    "all_of": [
+                      {
+                        "test": "has_tag",
+                        "subject": "self",
+                        "value": "team4"
+                      },
+                      {
+                        "test": "has_tag",
+                        "subject": "other",
+                        "value": "team4"
+                      }
+                    ]
+                  },
+                  {
+                    "all_of": [
+                      {
+                        "test": "has_tag",
+                        "subject": "self",
+                        "value": "team5"
+                      },
+                      {
+                        "test": "has_tag",
+                        "subject": "other",
+                        "value": "team5"
+                      }
+                    ]
+                  },
+                  {
+                    "all_of": [
+                      {
+                        "test": "has_tag",
+                        "subject": "self",
+                        "value": "team6"
+                      },
+                      {
+                        "test": "has_tag",
+                        "subject": "other",
+                        "value": "team6"
+                      }
+                    ]
+                  },
+                  {
+                    "all_of": [
+                      {
+                        "test": "has_tag",
+                        "subject": "self",
+                        "value": "team7"
+                      },
+                      {
+                        "test": "has_tag",
+                        "subject": "other",
+                        "value": "team7"
+                      }
+                    ]
+                  },
+                  {
+                    "all_of": [
+                      {
+                        "test": "has_tag",
+                        "subject": "self",
+                        "value": "team8"
+                      },
+                      {
+                        "test": "has_tag",
+                        "subject": "other",
+                        "value": "team8"
+                      }
+                    ]
+                  },
+                  {
+                    "all_of": [
+                      {
+                        "test": "has_tag",
+                        "subject": "self",
+                        "value": "team9"
+                      },
+                      {
+                        "test": "has_tag",
+                        "subject": "other",
+                        "value": "team9"
+                      }
+                    ]
+                  }
+                ]
+              }
+            },
+            "deals_damage": "no"
+          }
+        ]
+      },
+      "minecraft:breathable": {
+        "generates_bubbles": false,
+        "inhale_time": 3.75,
+        "suffocate_time": -1,
+        "total_supply": 15
+      },
+      "minecraft:can_climb": {},
+      "minecraft:collision_box": {
+        "height": 1.8,
+        "width": 0.6
+      },
+      "minecraft:conditional_bandwidth_optimization": {},
+      "minecraft:environment_sensor": {
+        "triggers": {}
+      },
+      "minecraft:exhaustion_values": {
+        "sprint": 0.1,
+        "jump": 0.05,
+        "attack": 0.1,
+        "damage": 0.1,
+        "heal": 6.0,
+        "lunge": 4.0,
+        "sprint_jump": 0.2,
+        "mine": 0.005,
+        "swim": 0.01,
+        "walk": 0.0
+      },
+      "minecraft:experience_reward": {
+        "on_death": {
+          "expression": "Math.Min(query.player_level * 7, 100)",
+          "version": 13
+        }
+      },
+      "minecraft:hurt_on_condition": {
+        "damage_conditions": [
+          {
+            "cause": "lava",
+            "damage_per_tick": 4,
+            "filters": {
+              "operator": "==",
+              "test": "in_lava",
+              "subject": "self",
+              "value": true
+            }
+          }
+        ]
+      },
+      "minecraft:insomnia": {
+        "days_until_insomnia": 3
+      },
+      "minecraft:is_hidden_when_invisible": {},
+      "minecraft:loot": {
+        "table": "loot_tables/empty.json"
+      },
+      "minecraft:movement": {
+        "value": 0.1
+      },
+      "minecraft:health": {
+        "max": 24
+      },
+      "minecraft:nameable": {
+        "allow_name_tag_renaming": false,
+        "always_show": true
+      },
+      "minecraft:physics": {
+        "push_towards_closest_space": true
+      },
+      "minecraft:player.exhaustion": {
+        "max": 20,
+        "value": 0
+      },
+      "minecraft:player.experience": {
+        "max": 1,
+        "value": 0
+      },
+      "minecraft:player.level": {
+        "max": 24791,
+        "value": 0
+      },
+      "minecraft:player.saturation": {
+        "max": 20,
+        "value": 5
+      },
+      "minecraft:pushable": {
+        "is_pushable": false,
+        "is_pushable_by_piston": true
+      },
+      "minecraft:rideable": {
+        "family_types": ["parrot_tame"],
+        "pull_in_entities": true,
+        "seat_count": 2,
+        "seats": [
+          {
+            "lock_rider_rotation": 0,
+            "min_rider_count": 0,
+            "max_rider_count": 0,
+            "position": [0.4, -0.2, -0.1]
+          },
+          {
+            "lock_rider_rotation": 0,
+            "min_rider_count": 1,
+            "max_rider_count": 2,
+            "position": [-0.4, -0.2, -0.1]
+          }
+        ]
+      },
+      "minecraft:type_family": {
+        "family": ["player"]
+      }
+    },
+    "component_groups": {},
+    "events": {}
+  }
+}

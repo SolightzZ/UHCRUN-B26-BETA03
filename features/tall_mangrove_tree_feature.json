@@ -1,0 +1,67 @@
+{
+  "format_version": "1.13.0",
+  "minecraft:tree_feature": {
+    "description": {
+      "identifier": "minecraft:tall_mangrove_tree_feature"
+    },
+
+    "trunk": {
+      "trunk_height": {
+        "range_min": 5,
+        "range_max": 7
+      },
+      "trunk_block": {
+        "name": "minecraft:mangrove_log"
+      }
+    },
+    "canopy": {
+      "canopy_offset": {
+        "min": -3,
+        "max": 0
+      },
+      "variation_chance": [
+        {
+          "numerator": 1,
+          "denominator": 1
+        }
+      ],
+      "leaf_block": {
+        "name": "minecraft:mangrove_leaves"
+      }
+    },
+
+    // Blocks the tree can be placed on.
+    "may_grow_on": [{ "tags": "query.any_tag('dirt')" }, "minecraft:clay"],
+    // Any "may_grow_on" block that is not specified here will be replaced with the first block in this list.
+    "base_block": ["minecraft:mud"],
+    // Blocks to ignore when checking for clearance around the tree. Already includes all blocks specified in "may_replace".
+    "may_grow_through": [{ "tags": "query.any_tag('dirt')" }, "minecraft:clay"],
+    // Blocks that can be replaced by the tree's trunk and canopy.
+    "may_replace": [
+      "minecraft:air",
+      "minecraft:snow_layer",
+      // All leaves
+      "minecraft:acacia_leaves",
+      "minecraft:azalea_leaves",
+      "minecraft:azalea_leaves_flowered",
+      "minecraft:birch_leaves",
+      "minecraft:cherry_leaves",
+      "minecraft:dark_oak_leaves",
+      "minecraft:jungle_leaves",
+      "minecraft:mangrove_leaves",
+      "minecraft:oak_leaves",
+      "minecraft:pale_oak_leaves",
+      "minecraft:spruce_leaves",
+      // Water
+      "minecraft:water",
+      "minecraft:flowing_water",
+      // Blocks used to decorate the tree
+      "minecraft:vine",
+      "minecraft:moss_carpet",
+      "minecraft:mangrove_propagule",
+      // Plants
+      "minecraft:wildflowers",
+      "minecraft:leaf_litter"
+    ]
+  }
+}

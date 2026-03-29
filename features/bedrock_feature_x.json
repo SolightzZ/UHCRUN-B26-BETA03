@@ -1,0 +1,31 @@
+{
+  "format_version": "1.13.0",
+  "minecraft:ore_feature": {
+    "description": {
+      "identifier": "custom:bedrock_x_feature"
+    },
+    "count": 128,
+    "replace_rules": [
+      {
+        "places_block": "minecraft:bedrock",
+        "may_replace": [
+          { "name": "minecraft:air" },
+          { "name": "minecraft:structure_void" },
+          { "name": "minecraft:jigsaw" },
+
+          { "name": "minecraft:water" },
+          { "name": "minecraft:lava" },
+
+          { "name": "minecraft:stone" },
+          { "name": "minecraft:deepslate" },
+          { "name": "minecraft:gravel" },
+          { "name": "minecraft:iron_chain" },
+          { "name": "minecraft:oak_fence" },
+          { "name": "minecraft:pointed_dripstone" },
+          { "name": "minecraft:web" },
+          { "name": "minecraft:rail" }
+        ]
+      }
+    ]
+  }
+}
