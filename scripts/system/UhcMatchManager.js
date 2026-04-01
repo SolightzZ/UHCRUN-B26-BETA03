@@ -202,21 +202,17 @@ function teleportManagerRunQueue(teamsData, positions, dimension) {
       finalLocationPool.z = targetPos.z;
       let mIdx = 0;
       const delay = TELEPORT_CONFIG.MEMBER_INTERVAL;
-      // snapshot validMembersPool ณ ตอนนี้ เพราะ validMembersPool เป็น shared array
-      // ถ้าใช้ตรงๆ จะถูก overwrite ตอน nextTeam() เรียกทีมถัดไป
-      const members = validMembersPool.slice();
-      const loc = { x: finalLocationPool.x, y: finalLocationPool.y, z: finalLocationPool.z };
 
       function nextMember() {
         if (aborted) return;
-        if (mIdx >= members.length) return nextTeam();
-        const p = members[mIdx++];
+        if (mIdx >= validMembersPool.length) return nextTeam();
+        const p = validMembersPool[mIdx++];
         if (!p?.isValid) {
           totalFail++;
           return system.runTimeout(nextMember, delay);
         }
         try {
-          p.teleport(loc, { dimension });
+          p.teleport(finalLocationPool, { dimension });
           totalOk++;
         } catch {
           totalFail++;
@@ -499,7 +495,7 @@ function gameLoopHandleWorldStart(tick, players) {
       break;
     case PVP_WARN:
       broadcast({
-        message: dynamicToast(`PVP starts in ${MinecraftColor.red}${PVP_DELAY} ${MinecraftColor.white}seconds`, "textures/ui/icon_multiplayer"),
+        message: dynamicToast(`PVP starts in ${MinecraftColor.red}}${PVP_DELAY} ${MinecraftColor.white}seconds`, "textures/ui/icon_multiplayer"),
         sound: "noti",
       });
       break;
@@ -572,15 +568,11 @@ export function startGameUhc() {
   function applyBatch() {
     const end = Math.min(idx + 5, total);
     for (; idx < end; idx++) playerSetupApplyStartState(players[idx]);
-    if (idx < total) {
-      system.runTimeout(applyBatch, 1);
-    } else {
-      // refreshPlayerCaches หลัง applyBatch เสร็จทุกคนแล้ว
-      // เพื่อให้ uhcPlayersCache มี tag "uhc" ครบก่อน teleport (tick=1)
-      refreshPlayerCaches();
-    }
+    if (idx < total) system.runTimeout(applyBatch, 1);
   }
   applyBatch();
+
+  refreshPlayerCaches();
   safeYCache.clear();
   if (teleportManagerRunQueue._abortHandlers) {
     teleportManagerRunQueue._abortHandlers.forEach((fn) => fn());

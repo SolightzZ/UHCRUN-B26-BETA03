@@ -20,29 +20,27 @@
 //
 // ============================================================
 
-// // Commmands
-// import "./customCommand/command.js";
+// Commmands
+import "./customCommand/command.js";
 
-// // Plugins
-// import "./plugin/AutoSmelt.js";
-// import "./plugin/ItemPickup.js";
-// import "./plugin/blockInteractGuard.js";
-// import "./plugin/Knockback.js";
-// import "./plugin/plateKnockback.js";
-// import "./plugin/anticheat_cps.js";
-// import "./plugin/tnt_instant.js";
-// import "./plugin/projectile_hit_sounds.js";
-// import "./plugin/enchant.js";
-// import "./plugin/fishing_hod.js";
-// import "./plugin/axe.js";
+// Plugins
+import "./plugin/AutoSmelt.js";
+import "./plugin/ItemPickup.js";
+import "./plugin/blockInteractGuard.js";
+import "./plugin/Knockback.js";
+import "./plugin/plateKnockback.js";
+import "./plugin/anticheat_cps.js";
+import "./plugin/tnt_instant.js";
+import "./plugin/projectile_hit_sounds.js";
+import "./plugin/enchant.js";
+import "./plugin/fishing_hod.js";
+import "./plugin/axe.js";
 
-// // System Games
-// import "./system/border.js";
+// System Games
+import "./system/border.js";
 
-// // Team Manager
-// import "./Manager/TeamManager.js";
+// Team Manager
+import "./Manager/TeamManager.js";
 
-// // Leaderboard
-// import "./Manager/Leaderboard.js";
-
-import "./Manager/DataPlayers";
+// Leaderboard
+import "./Manager/Leaderboard.js";

@@ -1,53 +1,30 @@
 import { world, system } from "@minecraft/server";
 
 // @ts-ignore
-import {
-  getTeamStats,
-  getTeamInfo,
-  getTeamKillObjective,
-  getPlayerStats,
-  getPlayerName,
-} from "../Manager/TeamManager.js";
-
-// ── Config ───────────────────────────────────────────────────────────────────
+import { getTeamStats, getTeamInfo, getTeamKillObjective, getPlayerStats, getPlayerName } from "../Manager/TeamManager.js";
 
 const MAX_PLAYERS = 10;
-const MAX_TEAMS   = 9;
+const MAX_TEAMS = 5;
 
-/** Render interval ใน tick (100 tick = 5 วินาที) */
-const RENDER_INTERVAL_TICKS = 100;
-
-const UI = Object.freeze({
-  HEAD:  `§g§l--- [ UHCRUN LEADERBOARD ] ---\n\n`,
-  FOOT:  `\n§g-----------------------------------`,
+const UI = {
+  HEAD: `§g§l--- [ UHCRUN LEADERBOARD ] ---\n\n`,
+  FOOT: `\n§g-----------------------------------`,
   RANKS: ["§6", "§7", "§c", "§f"],
-});
+};
 
-/**
- * พิกัด NPC สำหรับ Leaderboard แต่ละประเภท
- * เก็บรวมที่นี่แห่งเดียว — แก้ไขตรงนี้เมื่อย้ายแผนที่
- */
-const NPCS = Object.freeze([
+const NPCS = [
   { tag: "lb_players", x: 596.5, y: 127, z: 601.5 },
-  { tag: "lb_teams",   x: 593.5, y: 127, z: 600.5 },
-  { tag: "lb_deaths",  x: 599.5, y: 127, z: 600.5 },
-]);
-
-// ── Helpers ──────────────────────────────────────────────────────────────────
+  { tag: "lb_teams", x: 593.5, y: 127, z: 600.5 },
+  { tag: "lb_deaths", x: 599.5, y: 127, z: 600.5 },
+];
 
 function isAdmin(player) {
-  return player?.isValid && player.hasTag("admin");
+  return player.hasTag("admin");
 }
 
 function isLeaderboardNpc(entity) {
-  return (
-    entity.hasTag("lb_players") ||
-    entity.hasTag("lb_teams")   ||
-    entity.hasTag("lb_deaths")
-  );
+  return entity.hasTag("lb_players") || entity.hasTag("lb_teams") || entity.hasTag("lb_deaths");
 }
-
-// ── Stats Builders ───────────────────────────────────────────────────────────
 
 function getStats() {
   const raw = getPlayerStats();
@@ -59,11 +36,13 @@ function getStats() {
     const name = getPlayerName(id) ?? id;
     map.set(name, { kills: st.kills, deaths: st.deaths });
   }
+
   return map;
 }
 
 function getPlayerText(statsMap) {
   const list = [];
+
   for (const [name, st] of statsMap) {
     if (st.kills || st.deaths) list.push({ name, st });
   }
@@ -75,11 +54,14 @@ function getPlayerText(statsMap) {
   list.sort((a, b) => b.st.kills - a.st.kills);
 
   let text = `§eTop ${MAX_PLAYERS} Players (Kills)\n\n`;
+
   for (let i = 0; i < Math.min(list.length, MAX_PLAYERS); i++) {
     const { name, st } = list[i];
-    const color = UI.RANKS[i] ?? UI.RANKS[3];
+    const color = UI.RANKS[i] || UI.RANKS[3];
+
     text += `${color}#${i + 1} §a${name} §f- §c${st.kills} Kills §8(§4${st.deaths} Deaths§8)\n`;
   }
+
   return text;
 }
 
@@ -88,14 +70,17 @@ function getTeamText() {
     if (!list.length) return `§bTop Team Kills\n\n§7... data? ...\n`;
 
     let text = `§bTop Team Kills\n\n`;
+
     for (let i = 0; i < list.length; i++) {
-      const color = UI.RANKS[i] ?? UI.RANKS[3];
+      const color = UI.RANKS[i] || UI.RANKS[3];
       text += `${color}#${i + 1} ${list[i].name} §f: §c${list[i].kills} Kills\n`;
     }
+
     return text;
   };
 
   const obj = getTeamKillObjective();
+
   if (obj) {
     const scores = obj.getScores();
     if (!scores?.length) return build([]);
@@ -113,13 +98,18 @@ function getTeamText() {
   if (!tStats?.size) return build([]);
 
   const list = [];
+
   for (const [id, st] of tStats) {
     if (!(st.kills || st.deaths)) continue;
+
     const info = getTeamInfo(id);
     const name = info ? `${info.color}${info.name}` : `§f${id}`;
+
     list.push({ name, kills: st.kills });
   }
+
   list.sort((a, b) => b.kills - a.kills);
+
   return build(list.slice(0, MAX_TEAMS));
 }
 
@@ -133,24 +123,24 @@ function getDeathsText(statsMap) {
       topName = name;
     }
   }
+
   return `§cTop Deaths: §7${topName} (${max})§r\n`;
 }
-
-// ── Render ───────────────────────────────────────────────────────────────────
 
 let lastRenderTick = 0;
 
 export function renderBoard() {
-  if (system.currentTick - lastRenderTick < RENDER_INTERVAL_TICKS) return;
+  if (system.currentTick - lastRenderTick < 100) return;
   lastRenderTick = system.currentTick;
 
   const dim = world.getDimension("overworld");
 
   let pNpcs, tNpcs, dNpcs;
+
   try {
     pNpcs = dim.getEntities({ type: "minecraft:npc", tags: ["lb_players"] });
-    tNpcs = dim.getEntities({ type: "minecraft:npc", tags: ["lb_teams"]   });
-    dNpcs = dim.getEntities({ type: "minecraft:npc", tags: ["lb_deaths"]  });
+    tNpcs = dim.getEntities({ type: "minecraft:npc", tags: ["lb_teams"] });
+    dNpcs = dim.getEntities({ type: "minecraft:npc", tags: ["lb_deaths"] });
   } catch {
     return;
   }
@@ -160,44 +150,36 @@ export function renderBoard() {
   const stats = getStats();
 
   if (pNpcs.length) updateNpcText(pNpcs, UI.HEAD + getPlayerText(stats) + UI.FOOT);
-  if (tNpcs.length) updateNpcText(tNpcs, UI.HEAD + getTeamText()          + UI.FOOT);
-  if (dNpcs.length) updateNpcText(dNpcs, UI.HEAD + getDeathsText(stats)   + UI.FOOT);
+
+  if (tNpcs.length) updateNpcText(tNpcs, UI.HEAD + getTeamText() + UI.FOOT);
+
+  if (dNpcs.length) updateNpcText(dNpcs, UI.HEAD + getDeathsText(stats) + UI.FOOT);
 }
 
 function updateNpcText(npcs, text) {
   for (const npc of npcs) {
-    if (!npc?.isValid) continue;
     if (npc.nameTag !== text) npc.nameTag = text;
   }
 }
-
-// ── Spawn ────────────────────────────────────────────────────────────────────
 
 export function spawnLeaderboardNPC() {
   const dim = world.getDimension("overworld");
 
   system.runTimeout(() => {
     for (const cfg of NPCS) {
-      // ลบ NPC เดิม
-      const existing = dim.getEntities({ type: "minecraft:npc", tags: [cfg.tag] });
-      for (const npc of existing) npc.remove();
+      const npcs = dim.getEntities({ type: "minecraft:npc", tags: [cfg.tag] });
 
-      // spawn ใหม่
+      for (const npc of npcs) npc.remove();
+
       try {
-        const newNpc = dim.spawnEntity("minecraft:npc", {
-          x: cfg.x,
-          y: cfg.y,
-          z: cfg.z,
-        });
+        const newNpc = dim.spawnEntity("minecraft:npc", cfg);
         newNpc.addTag(cfg.tag);
       } catch {
-        console.warn("[Leaderboard] Chunk not loaded at spawn point:", cfg.x, cfg.y, cfg.z);
+        console.warn("[Spawn Leaderboard NPC] Chunk not loaded:", cfg.x, cfg.y, cfg.z);
       }
     }
   }, 20);
 }
-
-// ── Interaction ──────────────────────────────────────────────────────────────
 
 world.beforeEvents.playerInteractWithEntity.subscribe((ev) => {
   const { target, player } = ev;
@@ -213,7 +195,6 @@ world.beforeEvents.playerInteractWithEntity.subscribe((ev) => {
   }
 
   system.run(() => {
-    if (!player?.isValid) return;
     if (player.isSneaking) {
       renderBoard();
       player.playSound("random.orb", { volume: 0.5, pitch: 1 });
@@ -222,7 +203,6 @@ world.beforeEvents.playerInteractWithEntity.subscribe((ev) => {
   });
 });
 
-// Initial render หลัง world โหลด
 system.run(() => {
   renderBoard();
 });

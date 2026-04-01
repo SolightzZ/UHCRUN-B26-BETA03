@@ -4,7 +4,7 @@
     "name": "UHCRun Bedrock [B26BETA03]",
     "description": "By https://github.com/SolightzZ",
     "min_engine_version": [1, 26, 0],
-    "uuid": "2c8816d4-a3b5-4df8-a682-cf7332249c9a",
+    "uuid": "734734d8-34ac-4c51-9e8a-6864c5a727d5",
     "version": [1, 0, 3]
   },
   "modules": [
@@ -23,7 +23,7 @@
   ],
   "dependencies": [
     {
-      "uuid": "71f61a3d-dcb1-4220-8d43-8ecbc2f83d57",
+      "uuid": "93d59f56-b639-45bf-b724-63112d2ddfe2",
       "version": [1, 0, 3]
     },
     {

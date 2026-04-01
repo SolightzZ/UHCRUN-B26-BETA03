@@ -1,4 +1,4 @@
-import { DisplaySlotId, EntityDamageCause, MolangVariableMap, ObjectiveSortOrder, world } from "@minecraft/server";
+import { DisplaySlotId, EntityDamageCause, MolangVariableMap, world } from "@minecraft/server";
 
 // @ts-ignore
 import { getAllPlayers, getPlayerTeam, getTeams, getUhcPlayers } from "../Manager/TeamManager.js";
@@ -193,7 +193,7 @@ export function scoreboardInit() {
   const old = score.getObjective(uhc);
   if (old) score.removeObjective(old);
   const obj = score.addObjective(uhc, uhcName);
-  score.setObjectiveAtDisplaySlot(DisplaySlotId.Sidebar, { objective: obj, sortOrder: ObjectiveSortOrder.Descending }); // score สูง = บรรทัดบน
+  score.setObjectiveAtDisplaySlot(DisplaySlotId.Sidebar, { objective: obj });
   ctx.objective = obj;
   scoreCache.clear();
 }
@@ -378,7 +378,7 @@ function borderManagerBroadcastWarning() {
   const players = getUhcPlayers();
   if (!players.length) return;
   broadcast(players, {
-    message: dynamicToast("Border starts shrinking in 30 seconds", "textures/ui/ErrorGlyph_small_hover"),
+    message: dynamicToast("Border starts shrinking in 30 fseconds", "textures/ui/ErrorGlyph_small_hover"),
     sound: "noti",
   });
 }
