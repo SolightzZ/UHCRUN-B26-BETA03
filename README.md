@@ -1,4 +1,4 @@
-# UHC eature
+# UHC Feature
 
 ## 📟 command.js
 
