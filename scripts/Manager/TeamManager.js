@@ -351,6 +351,7 @@ const HIT_TIMEOUT_TICKS = 20 * KD.hitTimeoutSeconds,
 let teamKillObj = null;
 
 const GlobalPlayerCaches = new Map();
+
 function ensureGPC(id) {
   let c = GlobalPlayerCaches.get(id);
   if (!c) {
@@ -391,11 +392,11 @@ const createCacheProxy = (key) => {
   return proxy;
 };
 
-const playerTeamCache = createCacheProxy("teamId"),
-  hitRegistry = createCacheProxy("hit"),
-  multiKill = createCacheProxy("multiKill"),
-  killStreak = createCacheProxy("killStreak"),
-  playerCache = createCacheProxy("playerRef");
+const playerTeamCache = createCacheProxy("teamId");
+const hitRegistry = createCacheProxy("hit");
+const multiKill = createCacheProxy("multiKill");
+const killStreak = createCacheProxy("killStreak");
+const playerCache = createCacheProxy("playerRef");
 
 const uhcPlayerIds = {
   has: (id) => GlobalPlayerCaches.get(id)?.isUhc === true,
@@ -902,7 +903,7 @@ function onSpawn(ev) {
   if (!dynamicTeam) return;
 
   const inCache = playerTeamCache.has(player.id);
-  if (!inCache) {
+  if (!inCache && shouldTrackTeamRuntime(player)) {
     const before = teamCounts.get(dynamicTeam) ?? 0;
     teamCounts.set(dynamicTeam, before + 1);
     updateSidebar(dynamicTeam);
@@ -1888,6 +1889,7 @@ export function clearAllTaguhcAndDynamicProperty(executor) {
   allPlayersCache.length = 0;
   uhcPlayersCache.length = 0;
   allPlayersCacheIds.clear();
+  playerTeamCache.clear();
 
   itemVacuumQueue.length = 0;
   itemVacuumRunning = false;
