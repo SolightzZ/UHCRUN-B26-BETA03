@@ -43,6 +43,31 @@ import {
   MinecraftColor,
 } from "./BorderManager.js";
 
+const safeYCache = new Map();
+
+// ======================================================
+// getAllPlayersCached (ดึงผู้เล่นทั้งหมดจากแคช)
+// ======================================================
+function getAllPlayersCached() {
+  const players = getAllPlayers();
+  if (players.length > 0) return players;
+  refreshPlayerCaches();
+  return getAllPlayers();
+}
+
+// ======================================================
+// getUhcPlayersCached (ดึงผู้เล่น UHC จากแคช)
+// ======================================================
+function getUhcPlayersCached() {
+  const players = getUhcPlayers();
+  if (players.length > 0) return players;
+  refreshPlayerCaches();
+  return getUhcPlayers();
+}
+
+// ======================================================
+// Finds a safe Y position for teleporting (หาความสูง (Y) ที่ปลอดภัย สำหรับวาร์ปผู้เล่น)
+// ======================================================
 const TELEPORT_CONFIG = Object.freeze({
   PRELOAD_Y: 200,
   PRELOAD_DELAY: 2,
@@ -53,75 +78,6 @@ const TELEPORT_CONFIG = Object.freeze({
   MAX_SPAWN_RADIUS: 490,
 });
 
-// === PVP timing
-// uhcTick นับทีละ 1 ต่อ interval (1 interval = 20 game-ticks = 1 วินาที)
-// nextShrinkTick = 300 → PVP เปิดหลัง border เริ่มหด 20 วินาที (PVP_DELAY)
-const PVP_DELAY = 20; // วินาที
-const PVP_TICK = 300 + PVP_DELAY; // uhcTick ที่ pvp เปิด (320)
-const PVP_WARN = PVP_TICK - 20; // แจ้งก่อน 20 วินาที
-const PVP_CD3 = PVP_TICK - 3;
-const PVP_CD2 = PVP_TICK - 2;
-
-// === VICTORY CHECK interval ===
-// ตรวจทุก 6 uhcTick (~6 วินาที) แทนที่จะเป็น 120 (2 นาที)
-const VICTORY_CHECK_INTERVAL = 60;
-
-const positionsPool = [];
-const teleportLocLeader = { x: 0, y: 0, z: 0 };
-
-const safeYCache = new Map();
-const teleportQueueAbortHandlers = [];
-
-const explosionLocPool = { x: 0, y: 0, z: 0 };
-const effectOptionsHidden = { amplifier: 255, showParticles: false };
-const soundOptionsStart = { volume: 0.8, pitch: 1 };
-const soundOptionsPlayers = { volume: 1, pitch: 1 };
-const soundOptionsExplode = { volume: 0.7, pitch: 0.9 };
-const soundOptionsPling = { volume: 1, pitch: 1 };
-
-function getAllPlayersCached() {
-  const players = getAllPlayers();
-  if (players.length > 0) return players;
-  refreshPlayerCaches();
-  return getAllPlayers();
-}
-
-function getUhcPlayersCached() {
-  const players = getUhcPlayers();
-  if (players.length > 0) return players;
-  refreshPlayerCaches();
-  return getUhcPlayers();
-}
-
-const UHC_EFFECTS = ["regeneration", "blindness", "invisibility", "resistance", "conduit_power", "slow_falling"];
-const aliveTeamsSet = new Set();
-const CRITICAL_TICKS = new Set([1, 2, 4, 24, 26]);
-const UHC_PLAYER_EFFECTS = [
-  ["regeneration", 520],
-  ["blindness", 520],
-  ["invisibility", 1200],
-  ["resistance", 1200],
-];
-
-const actionBar = 25;
-const actionNum = 5;
-
-const startBars = (() => {
-  const prefix = "§fGame Start §l»§r ";
-  const bars = new Array(actionBar + 1);
-  for (let tick = 0; tick <= actionBar; tick++) {
-    const remaining = actionBar - tick;
-    const filled = ((tick * actionNum) / actionBar) | 0;
-    const empty = actionNum - filled;
-    bars[tick] =
-      prefix + MinecraftColor.darkAqua + "▌".repeat(filled) + MinecraftColor.gray + "▌".repeat(empty) + MinecraftColor.white + ` ${remaining}`;
-  }
-  return bars;
-})();
-
-// === Teleport helpers ===
-//
-// ========================
 function teleportManagerGetSafeY(dimension, x, z) {
   if (!Number.isFinite(x) || !Number.isFinite(z)) return TELEPORT_CONFIG.DEFAULT_Y;
   const key = `${x | 0},${z | 0}`;
@@ -138,6 +94,9 @@ function teleportManagerGetSafeY(dimension, x, z) {
   }
 }
 
+// ======================================================
+// Groups players by team (จัดกลุ่มผู้เล่นตามทีม)
+// ======================================================
 function teleportManagerGroupByTeam() {
   const teamMap = new Map(),
     players = getUhcPlayersCached();
@@ -156,6 +115,10 @@ function teleportManagerGroupByTeam() {
   return teamMap;
 }
 
+// ======================================================
+// Player Teleport Generate (X,Z)
+// ======================================================
+const positionsPool = [];
 function teleportManagerGenerateXZ(teamCount, radius) {
   const effectiveRadius = Math.min(radius, TELEPORT_CONFIG.MAX_SPAWN_RADIUS),
     angleStep = (Math.PI * 2) / teamCount,
@@ -174,6 +137,11 @@ function teleportManagerGenerateXZ(teamCount, radius) {
   return positionsPool;
 }
 
+// ======================================================
+// Player Teleport Queue
+// ======================================================
+const teleportLocLeader = { x: 0, y: 0, z: 0 };
+const teleportQueueAbortHandlers = [];
 function teleportManagerRunQueue(teamsData, positions, dimension) {
   let teamIdx = 0,
     totalOk = 0,
@@ -215,14 +183,12 @@ function teleportManagerRunQueue(teamsData, positions, dimension) {
     const members = teamData[1];
     if (!members?.length) return nextTeam();
 
-    // snapshot สมาชิกทีมนี้ก่อน async เพื่อป้องกัน shared-pool overwrite
     const snapshot = [];
     for (let i = 0; i < members.length; i++) {
       if (members[i]?.isValid) snapshot.push(members[i]);
     }
     if (!snapshot.length) return nextTeam();
 
-    // capture ตัวเลข ไม่ใช้ reference ของ shared positionsPool
     const capturedX = targetPos.x;
     const capturedZ = targetPos.z;
 
@@ -269,6 +235,9 @@ function teleportManagerRunQueue(teamsData, positions, dimension) {
   nextTeam();
 }
 
+// ======================================================
+// Main telrport Team
+// ======================================================
 function teleportManagerTeleportTeam(radius) {
   if (radius === undefined) radius = ctx.borderRadius;
   if (!Number.isFinite(radius)) radius = ctx.borderRadius;
@@ -284,8 +253,9 @@ function teleportManagerTeleportTeam(radius) {
   teleportManagerRunQueue(teamsData, positions, ctx.cachedDimension);
 }
 
-// === Player setup helpers
-
+// ======================================================
+// Player add tools
+// ======================================================
 function playerSetupAddItems(player) {
   if (!player?.isValid) return;
   const inv = player.getComponent("minecraft:inventory")?.container;
@@ -296,6 +266,10 @@ function playerSetupAddItems(player) {
   inv.addItem(new ItemStack("minecraft:oak_boat", 1));
 }
 
+// ======================================================
+// Player spawnParticle
+// ======================================================
+const explosionLocPool = { x: 0, y: 0, z: 0 };
 function playerSetupSpawnParticles(player) {
   if (!player?.isValid || !getPlayerTeam(player)) return;
   const { x, y, z } = player.location;
@@ -310,6 +284,12 @@ function playerSetupSpawnParticles(player) {
   } catch {}
 }
 
+// ======================================================
+// Player Setup Handle GameStart (tag uhc)
+// ======================================================
+const soundOptionsStart = { volume: 0.8, pitch: 1 };
+const soundOptionsPlayers = { volume: 1, pitch: 1 };
+const soundOptionsExplode = { volume: 0.7, pitch: 0.9 };
 function playerSetupHandleGameStart(player, tick) {
   if (tick > 26) return;
   const input = player.inputPermissions;
@@ -338,6 +318,24 @@ function playerSetupHandleGameStart(player, tick) {
       break;
   }
 }
+// ======================================================
+// Player Display GameStart
+// ======================================================
+
+const actionBar = 25;
+const actionNum = 5;
+const startBars = (() => {
+  const prefix = "§fGame Start §l»§r ";
+  const bars = new Array(actionBar + 1);
+  for (let tick = 0; tick <= actionBar; tick++) {
+    const remaining = actionBar - tick;
+    const filled = ((tick * actionNum) / actionBar) | 0;
+    const empty = actionNum - filled;
+    bars[tick] =
+      prefix + MinecraftColor.darkAqua + "▌".repeat(filled) + MinecraftColor.gray + "▌".repeat(empty) + MinecraftColor.white + ` ${remaining}`;
+  }
+  return bars;
+})();
 
 function playerSetupDisplayGameStart(player) {
   const tick = ctx.uhcTick;
@@ -346,16 +344,22 @@ function playerSetupDisplayGameStart(player) {
   const remaining = actionBar - tick,
     playSound = remaining === 20 || remaining === 10 || remaining <= 5;
   player.onScreenDisplay.setActionBar(startBars[tick]);
-  if (playSound) player.playSound("note.pling", soundOptionsPling);
+  if (playSound) player.playSound("note.pling", { volume: 1, pitch: 1 });
 }
 
+// ======================================================
+// Player clear effect
+// ======================================================
+const UHC_EFFECTS = ["regeneration", "blindness", "invisibility", "resistance", "conduit_power", "slow_falling"];
 function playerSetupClearEffects(player) {
   if (!player?.isValid) return;
   for (let i = 0; i < UHC_EFFECTS.length; i++) player.removeEffect(UHC_EFFECTS[i]);
 }
 
+// ======================================================
+// Player add Compass all player
+// ======================================================
 function playerSetupClearItemsKeepCompass() {
-  // ดึง players ตอนนี้ทันที
   const players = world.getPlayers();
   const total = players.length;
   if (total === 0) return;
@@ -395,11 +399,25 @@ function playerSetupClearItemsKeepCompass() {
   }
 }
 
+// ======================================================
+// Check Stop gameloop
+// ======================================================
 function stopGameLoop() {
   if (ctx.checkInterval === null) return;
   system.clearRun(ctx.checkInterval);
   ctx.checkInterval = null;
 }
+
+// ======================================================
+// player Add Spectator is not tag uhc
+// ======================================================
+const UHC_PLAYER_EFFECTS = [
+  ["regeneration", 520],
+  ["blindness", 520],
+  ["invisibility", 1200],
+  ["resistance", 1200],
+];
+const effectOptionsHidden = { amplifier: 255, showParticles: false };
 
 function playerSetupApplyStartState(player) {
   if (!player?.isValid) return;
@@ -415,6 +433,9 @@ function playerSetupApplyStartState(player) {
   player.addEffect("conduit_power", 1, effectOptionsHidden);
 }
 
+// ======================================================
+// Player addEffect
+// ======================================================
 function playerSetupApplyEndState(player) {
   if (!player?.isValid) return;
   if (getPlayerTeam(player)) {
@@ -426,7 +447,9 @@ function playerSetupApplyEndState(player) {
   player.removeEffect("conduit_power");
 }
 
-// === Victory
+// ======================================================
+// victory Check Player and Gameloop
+// ======================================================
 function victoryManagerTriggerDraw() {
   if (!ctx.isRunning) return;
   ctx.isRunning = false;
@@ -436,8 +459,10 @@ function victoryManagerTriggerDraw() {
   victoryManagerStartCountdown();
 }
 
+// ======================================================
+// victory Countdown
+// ======================================================
 let countdownRunning = false;
-
 function victoryManagerStartCountdown() {
   if (countdownRunning) return;
   countdownRunning = true;
@@ -453,6 +478,9 @@ function victoryManagerStartCountdown() {
   }, 20);
 }
 
+// ======================================================
+//  victory Dynamic Message
+// ======================================================
 function victoryManagerTriggerWin(winTag) {
   if (!ctx.isRunning) return;
   ctx.isRunning = false;
@@ -485,6 +513,10 @@ function victoryManagerTriggerWin(winTag) {
   victoryManagerStartCountdown();
 }
 
+// ======================================================
+//  victory Check Player (tick = 20 % 60 == 0)
+// ======================================================
+const aliveTeamsSet = new Set();
 function victoryManagerCheck() {
   if (!ctx.isRunning) return;
   const players = getUhcPlayersCached();
@@ -497,7 +529,7 @@ function victoryManagerCheck() {
     const tag = getPlayerTeam(players[i]);
     if (!tag) continue;
     aliveTeamsSet.add(tag);
-    if (aliveTeamsSet.size > 1) return; // early exit — ยังเหลือหลายทีม
+    if (aliveTeamsSet.size > 1) return;
   }
   if (aliveTeamsSet.size === 1) {
     victoryManagerTriggerWin(aliveTeamsSet.values().next().value);
@@ -506,7 +538,19 @@ function victoryManagerCheck() {
   victoryManagerTriggerDraw();
 }
 
-// === Game loop ===
+// ======================================================
+// Dynamic Message
+// ======================================================
+
+// Config PVP timing
+// uhcTick นับทีละ 1 ต่อ interval (1 interval = 20 game-ticks = 1 วินาที)
+// nextShrinkTick = 300 → PVP เปิดหลัง border เริ่มหด 20 วินาที (PVP_DELAY)
+const PVP_DELAY = 20; // วินาที
+const PVP_TICK = 400 + PVP_DELAY; // uhcTick ที่ pvp เปิด (420)
+const PVP_WARN = PVP_TICK - 20; // แจ้งก่อน 20 วินาที
+const PVP_CD3 = PVP_TICK - 3;
+const PVP_CD2 = PVP_TICK - 2;
+
 function gameLoopHandleWorldStart(tick, players) {
   if (tick > PVP_TICK + 1 || !players.length) return;
   switch (tick) {
@@ -548,6 +592,10 @@ function gameLoopHandleWorldStart(tick, players) {
   }
 }
 
+// ======================================================
+// Main GameLoop Display
+// ======================================================
+const CRITICAL_TICKS = new Set([1, 2, 4, 24, 26]);
 function gameLoopPlayersTick(players) {
   if (!players.length || ctx.uhcTick > 26) return;
   const tick = ctx.uhcTick,
@@ -560,7 +608,11 @@ function gameLoopPlayersTick(players) {
   }
 }
 
-function gameLoopWorldTick(uhcPlayers) {
+// ======================================================
+// Main GameLoop Event
+// ======================================================
+
+function gameLoopWorld(uhcPlayers) {
   borderManagerTick();
   borderManagerTickShrink();
   if (ctx.isRunning && ctx.uhcTick <= PVP_TICK) gameLoopHandleWorldStart(ctx.uhcTick, uhcPlayers);
@@ -568,16 +620,18 @@ function gameLoopWorldTick(uhcPlayers) {
   particleRendererTick(uhcPlayers);
 }
 
+// ======================================================
+// Main GameLoop System
+// ======================================================
 function gameLoopRun() {
   ctx.checkInterval = system.runInterval(() => {
     if (!ctx.isRunning) return;
     ctx.uhcTick++;
 
-    // FIX: ตรวจทุก VICTORY_CHECK_INTERVAL วินาที (~6 วิ) แทน 120 วิ
-    if (ctx.uhcTick % VICTORY_CHECK_INTERVAL === 0) victoryManagerCheck();
+    if (ctx.uhcTick % 60 === 0) victoryManagerCheck();
 
     const uhcPlayers = getUhcPlayersCached();
-    gameLoopWorldTick(uhcPlayers);
+    gameLoopWorld(uhcPlayers);
     if (ctx.uhcTick <= 26) gameLoopPlayersTick(uhcPlayers);
   }, ticks);
 }
@@ -588,7 +642,11 @@ export function markAliveTeamDirty() {
 
 registerAliveTeamDirtyHandler(markAliveTeamDirty);
 
-// === startGameUhc
+// ======================================================
+//
+//                  start GameUhc
+//
+// ======================================================
 export function startGameUhc() {
   if (ctx.isRunning) return;
   stopGameLoop();
@@ -619,7 +677,12 @@ export function startGameUhc() {
   playerSetupClearItemsKeepCompass();
 }
 
-// === endGameUhc ===
+// ======================================================
+//
+//                  End GameUhc
+//
+// ======================================================
+
 export function endGameUhc() {
   const prevShowCoordinates = ctx.prevShowCoordinates;
   stopGameLoop();
@@ -643,7 +706,11 @@ export function endGameUhc() {
   borderManagerSyncGeometry();
 }
 
-// === resetGameUhc ===
+// ======================================================
+//
+//                  Reset GameUhc
+//
+// ======================================================
 
 export function resetGameUhc() {
   const prevShowCoordinates = ctx.prevShowCoordinates;

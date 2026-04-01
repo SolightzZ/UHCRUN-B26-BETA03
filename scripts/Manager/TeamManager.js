@@ -2,9 +2,9 @@ import { world, system, DisplaySlotId, GameMode } from "@minecraft/server";
 import { ActionFormData } from "@minecraft/server-ui";
 import { dynamicToast } from "../plugin/Util";
 
-let allPlayersCache = [],
-  uhcPlayersCache = [],
-  allPlayersCacheIds = new Set();
+let allPlayersCache = [];
+let uhcPlayersCache = [];
+let allPlayersCacheIds = new Set();
 
 let aliveTeamDirtyHandler = () => {};
 

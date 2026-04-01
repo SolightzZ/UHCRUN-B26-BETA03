@@ -21,16 +21,11 @@ import {
 } from "./BorderManager.js";
 
 // @ts-ignore
-import {
-  endGameUhc,
-  markAliveTeamDirty,
-  resetGameUhc,
-  startGameUhc,
-} from "./UhcMatchManager.js";
+import { endGameUhc, markAliveTeamDirty, resetGameUhc, startGameUhc } from "./UhcMatchManager.js";
 
-const GLOBAL_BORDER_LIMIT  = CHECKPOINTS[0];
+const GLOBAL_BORDER_LIMIT = CHECKPOINTS[0];
 const PLACE_BLOCK_LOCK_RADIUS = 16;
-const FORCE_FILL_COMMAND   = "!fill";
+const FORCE_FILL_COMMAND = "!fill";
 
 /** ตรวจว่าผู้เล่นเป็น UHC player ที่ valid อยู่ */
 function isUhcPlayer(player) {
@@ -79,25 +74,17 @@ function handleBorderAction(ev, target) {
   return false;
 }
 
-// ── Event Subscriptions ──────────────────────────────────────────────────────
+// Event Subscriptions
 
 world.beforeEvents.playerPlaceBlock.subscribe((ev) => {
   if (handleBorderAction(ev, ev.block)) return;
-  if (
-    ctx.isRunning &&
-    ctx.borderRadius <= PLACE_BLOCK_LOCK_RADIUS &&
-    isUhcPlayer(ev.player)
-  ) {
+  if (ctx.isRunning && ctx.borderRadius <= PLACE_BLOCK_LOCK_RADIUS && isUhcPlayer(ev.player)) {
     ev.cancel = true;
   }
 });
 
-world.beforeEvents.playerInteractWithEntity.subscribe((ev) =>
-  handleBorderAction(ev, ev.target)
-);
-world.beforeEvents.playerInteractWithBlock.subscribe((ev) =>
-  handleBorderAction(ev, ev.block)
-);
+world.beforeEvents.playerInteractWithEntity.subscribe((ev) => handleBorderAction(ev, ev.target));
+world.beforeEvents.playerInteractWithBlock.subscribe((ev) => handleBorderAction(ev, ev.block));
 
 world.beforeEvents.chatSend.subscribe((ev) => {
   const player = ev.sender;
@@ -108,8 +95,6 @@ world.beforeEvents.chatSend.subscribe((ev) => {
   ev.cancel = true;
   system.run(() => forceFinalShrink(player));
 });
-
-// ── Force Fill ───────────────────────────────────────────────────────────────
 
 function forceFinalShrink(player) {
   if (!player?.isValid) return;
@@ -124,11 +109,11 @@ function forceFinalShrink(player) {
   }
 
   ctx.fillCommandLocked = true;
-  ctx.nextShrinkIndex   = CHECKPOINTS.length;
-  ctx.targetRadius      = borderEnd;
-  ctx.startRadius       = ctx.borderRadius;
-  ctx.shrinkStartTick   = ctx.uhcTick;
-  ctx.shrinkDuration    = borderManagerGetShrinkDuration(borderEnd);
+  ctx.nextShrinkIndex = CHECKPOINTS.length;
+  ctx.targetRadius = borderEnd;
+  ctx.startRadius = ctx.borderRadius;
+  ctx.shrinkStartTick = ctx.uhcTick;
+  ctx.shrinkDuration = borderManagerGetShrinkDuration(borderEnd);
   ctx.currentBorderColor = borderColors.red;
   endSequenceReset();
 
