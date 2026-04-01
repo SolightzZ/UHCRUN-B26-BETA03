@@ -354,6 +354,6 @@
 
 # 📊 FINAL TOTAL
 
-> **≈ 210+ Features (ครบทุกระบบจริง)**
+> **≈ 210+ Features **
 
 ---
