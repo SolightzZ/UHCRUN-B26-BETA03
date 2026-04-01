@@ -1,8 +1,4 @@
-# 🔌 UHC Plugin – Full Feature Table
-
----
-
-# 🧠 Core Systems
+# UHC eature
 
 ## 📟 command.js
 
