@@ -45,7 +45,7 @@ import {
 
 const TELEPORT_CONFIG = Object.freeze({
   PRELOAD_Y: 200,
-  PRELOAD_DELAY: 20,
+  PRELOAD_DELAY: 2,
   MEMBER_INTERVAL: 3,
   DEFAULT_Y: 120,
   MIN_Y: -64,
@@ -53,26 +53,45 @@ const TELEPORT_CONFIG = Object.freeze({
   MAX_SPAWN_RADIUS: 490,
 });
 
-const PVP_DELAY = 20; // วินาทีหลัง border เริ่มลดลง
-const PVP_TICK = 300 + PVP_DELAY * 20; // tick ที่ pvp เปิด
-const PVP_WARN = PVP_TICK - 400; // ประกาศก่อน 20 วินาที
-const PVP_CD3 = PVP_TICK - 60; // นับถอยหลัง 3
-const PVP_CD2 = PVP_TICK - 40; // นับถอยหลัง 2
+// === PVP timing
+// uhcTick นับทีละ 1 ต่อ interval (1 interval = 20 game-ticks = 1 วินาที)
+// nextShrinkTick = 300 → PVP เปิดหลัง border เริ่มหด 20 วินาที (PVP_DELAY)
+const PVP_DELAY = 20; // วินาที
+const PVP_TICK = 300 + PVP_DELAY; // uhcTick ที่ pvp เปิด (320)
+const PVP_WARN = PVP_TICK - 20; // แจ้งก่อน 20 วินาที
+const PVP_CD3 = PVP_TICK - 3;
+const PVP_CD2 = PVP_TICK - 2;
 
-const positionsPool = [],
-  validMembersPool = [],
-  finalLocationPool = { x: 0, y: 0, z: 0 },
-  teleportLocLeader = { x: 0, y: 0, z: 0 },
-  effectOptionsSlowFalling = { amplifier: 255, showParticles: false };
+// === VICTORY CHECK interval ===
+// ตรวจทุก 6 uhcTick (~6 วินาที) แทนที่จะเป็น 120 (2 นาที)
+const VICTORY_CHECK_INTERVAL = 60;
+
+const positionsPool = [];
+const teleportLocLeader = { x: 0, y: 0, z: 0 };
 
 const safeYCache = new Map();
+const teleportQueueAbortHandlers = [];
 
-const explosionLocPool = { x: 0, y: 0, z: 0 },
-  effectOptionsHidden = { amplifier: 255, showParticles: false },
-  soundOptionsStart = { volume: 0.8, pitch: 1 },
-  soundOptionsPlayers = { volume: 1, pitch: 1 },
-  soundOptionsExplode = { volume: 0.7, pitch: 0.9 },
-  soundOptionsPling = { volume: 1, pitch: 1 };
+const explosionLocPool = { x: 0, y: 0, z: 0 };
+const effectOptionsHidden = { amplifier: 255, showParticles: false };
+const soundOptionsStart = { volume: 0.8, pitch: 1 };
+const soundOptionsPlayers = { volume: 1, pitch: 1 };
+const soundOptionsExplode = { volume: 0.7, pitch: 0.9 };
+const soundOptionsPling = { volume: 1, pitch: 1 };
+
+function getAllPlayersCached() {
+  const players = getAllPlayers();
+  if (players.length > 0) return players;
+  refreshPlayerCaches();
+  return getAllPlayers();
+}
+
+function getUhcPlayersCached() {
+  const players = getUhcPlayers();
+  if (players.length > 0) return players;
+  refreshPlayerCaches();
+  return getUhcPlayers();
+}
 
 const UHC_EFFECTS = ["regeneration", "blindness", "invisibility", "resistance", "conduit_power", "slow_falling"];
 const aliveTeamsSet = new Set();
@@ -90,7 +109,6 @@ const actionNum = 5;
 const startBars = (() => {
   const prefix = "§fGame Start §l»§r ";
   const bars = new Array(actionBar + 1);
-
   for (let tick = 0; tick <= actionBar; tick++) {
     const remaining = actionBar - tick;
     const filled = ((tick * actionNum) / actionBar) | 0;
@@ -98,10 +116,12 @@ const startBars = (() => {
     bars[tick] =
       prefix + MinecraftColor.darkAqua + "▌".repeat(filled) + MinecraftColor.gray + "▌".repeat(empty) + MinecraftColor.white + ` ${remaining}`;
   }
-
   return bars;
 })();
 
+// === Teleport helpers ===
+//
+// ========================
 function teleportManagerGetSafeY(dimension, x, z) {
   if (!Number.isFinite(x) || !Number.isFinite(z)) return TELEPORT_CONFIG.DEFAULT_Y;
   const key = `${x | 0},${z | 0}`;
@@ -120,7 +140,7 @@ function teleportManagerGetSafeY(dimension, x, z) {
 
 function teleportManagerGroupByTeam() {
   const teamMap = new Map(),
-    players = getUhcPlayers();
+    players = getUhcPlayersCached();
   for (let i = 0; i < players.length; i++) {
     const player = players[i];
     if (!player?.isValid) continue;
@@ -163,57 +183,75 @@ function teleportManagerRunQueue(teamsData, positions, dimension) {
   const abort = () => {
     aborted = true;
   };
-  const abortHandlers = teleportManagerRunQueue._abortHandlers ?? (teleportManagerRunQueue._abortHandlers = []);
-  abortHandlers.push(abort);
+  teleportQueueAbortHandlers.push(abort);
+
+  function removeAbortHandler() {
+    const index = teleportQueueAbortHandlers.indexOf(abort);
+    if (index !== -1) teleportQueueAbortHandlers.splice(index, 1);
+  }
+
+  function finishQueue() {
+    removeAbortHandler();
+    world.sendMessage(
+      `[UHC] All teams teleported. ${MinecraftColor.gray}(OK:${totalOk}` +
+        (totalFail > 0 ? ` ${MinecraftColor.red}fail:${totalFail}` : "") +
+        `${MinecraftColor.gray})`,
+    );
+  }
 
   function nextTeam() {
-    if (aborted) return;
-    if (teamIdx >= teamsData.length) {
-      world.sendMessage(
-        `[UHC] All teams teleported. ${MinecraftColor.gray}(T${totalOk}${totalFail > 0 ? ` ${MinecraftColor.red}fail:${totalFail}` : MinecraftColor.gray})`,
-      );
+    if (aborted) {
+      removeAbortHandler();
       return;
     }
-    const [, members] = teamsData[teamIdx],
-      targetPos = positions[teamIdx];
+    if (teamIdx >= teamsData.length) return finishQueue();
+
+    const teamData = teamsData[teamIdx];
+    const targetPos = positions[teamIdx];
     teamIdx++;
-    if (!members?.length || !targetPos) return nextTeam();
 
-    validMembersPool.length = 0;
+    if (!teamData || !targetPos) return nextTeam();
+
+    const members = teamData[1];
+    if (!members?.length) return nextTeam();
+
+    // snapshot สมาชิกทีมนี้ก่อน async เพื่อป้องกัน shared-pool overwrite
+    const snapshot = [];
     for (let i = 0; i < members.length; i++) {
-      if (members[i]?.isValid) validMembersPool.push(members[i]);
+      if (members[i]?.isValid) snapshot.push(members[i]);
     }
-    if (!validMembersPool.length) return nextTeam();
+    if (!snapshot.length) return nextTeam();
 
-    const leader = validMembersPool[0];
+    // capture ตัวเลข ไม่ใช้ reference ของ shared positionsPool
+    const capturedX = targetPos.x;
+    const capturedZ = targetPos.z;
+
+    const leader = snapshot[0];
     try {
-      teleportLocLeader.x = targetPos.x;
+      teleportLocLeader.x = capturedX;
       teleportLocLeader.y = TELEPORT_CONFIG.PRELOAD_Y;
-      teleportLocLeader.z = targetPos.z;
+      teleportLocLeader.z = capturedZ;
       leader.teleport(teleportLocLeader, { dimension });
-      leader.addEffect("slow_falling", TELEPORT_CONFIG.PRELOAD_DELAY + 20, effectOptionsSlowFalling);
     } catch {
       return nextTeam();
     }
 
     system.runTimeout(() => {
-      finalLocationPool.x = targetPos.x;
-      finalLocationPool.y = teleportManagerGetSafeY(dimension, targetPos.x, targetPos.z);
-      finalLocationPool.z = targetPos.z;
+      if (aborted) return;
+
+      const safeY = teleportManagerGetSafeY(dimension, capturedX, capturedZ);
+      const loc = { x: capturedX, y: safeY, z: capturedZ };
+
       let mIdx = 0;
-      const delay = TELEPORT_CONFIG.MEMBER_INTERVAL;
-      // snapshot validMembersPool ณ ตอนนี้ เพราะ validMembersPool เป็น shared array
-      // ถ้าใช้ตรงๆ จะถูก overwrite ตอน nextTeam() เรียกทีมถัดไป
-      const members = validMembersPool.slice();
-      const loc = { x: finalLocationPool.x, y: finalLocationPool.y, z: finalLocationPool.z };
 
       function nextMember() {
         if (aborted) return;
-        if (mIdx >= members.length) return nextTeam();
-        const p = members[mIdx++];
+        if (mIdx >= snapshot.length) return nextTeam();
+
+        const p = snapshot[mIdx++];
         if (!p?.isValid) {
           totalFail++;
-          return system.runTimeout(nextMember, delay);
+          return system.runTimeout(nextMember, TELEPORT_CONFIG.MEMBER_INTERVAL);
         }
         try {
           p.teleport(loc, { dimension });
@@ -221,7 +259,7 @@ function teleportManagerRunQueue(teamsData, positions, dimension) {
         } catch {
           totalFail++;
         }
-        system.runTimeout(nextMember, delay);
+        system.runTimeout(nextMember, TELEPORT_CONFIG.MEMBER_INTERVAL);
       }
 
       nextMember();
@@ -245,6 +283,8 @@ function teleportManagerTeleportTeam(radius) {
   const positions = teleportManagerGenerateXZ(teamsData.length, radius);
   teleportManagerRunQueue(teamsData, positions, ctx.cachedDimension);
 }
+
+// === Player setup helpers
 
 function playerSetupAddItems(player) {
   if (!player?.isValid) return;
@@ -277,6 +317,7 @@ function playerSetupHandleGameStart(player, tick) {
     case 1:
       player.setGameMode(GameMode.Adventure);
       input?.setPermissionCategory(InputPermissionCategory.Movement, false);
+
       break;
     case 2:
       player.playSound("start", soundOptionsStart);
@@ -314,55 +355,44 @@ function playerSetupClearEffects(player) {
 }
 
 function playerSetupClearItemsKeepCompass() {
+  // ดึง players ตอนนี้ทันที
   const players = world.getPlayers();
   const total = players.length;
   if (total === 0) return;
 
-  const token = { cancelled: false };
-  playerSetupClearItemsKeepCompass._token = token;
+  for (let i = 0; i < total; i++) {
+    const p = players[i];
+    if (!p?.isValid) continue;
+    const inv = p.getComponent("minecraft:inventory")?.container;
+    if (!inv) continue;
 
-  const BATCH = 3;
-  let offset = 0;
-
-  const run = () => {
-    if (token.cancelled) return;
-    const end = Math.min(offset + BATCH, total);
-    for (let i = offset; i < end; i++) {
-      const p = players[i];
-      if (!p?.isValid) continue;
-      const inv = p.getComponent("minecraft:inventory")?.container;
-      if (!inv) continue;
-      let compassSlot = -1;
-      for (let slot = 0; slot < inv.size; slot++) {
-        const item = inv.getItem(slot);
-        if (!item) continue;
-        if (item.typeId === "minecraft:compass") {
-          if (compassSlot === -1) {
-            compassSlot = slot;
-            if (item.amount !== 1) {
-              item.amount = 1;
-              inv.setItem(slot, item);
-            }
-          } else {
-            inv.setItem(slot);
+    let compassSlot = -1;
+    for (let slot = 0; slot < inv.size; slot++) {
+      const item = inv.getItem(slot);
+      if (!item) continue;
+      if (item.typeId === "minecraft:compass") {
+        if (compassSlot === -1) {
+          compassSlot = slot;
+          if (item.amount !== 1) {
+            item.amount = 1;
+            inv.setItem(slot, item);
           }
         } else {
           inv.setItem(slot);
         }
+      } else {
+        inv.setItem(slot);
       }
-      const equip = p.getComponent("minecraft:equippable");
-      if (!equip) continue;
-      equip.setEquipment(EquipmentSlot.Offhand, undefined);
-      equip.setEquipment(EquipmentSlot.Head, undefined);
-      equip.setEquipment(EquipmentSlot.Chest, undefined);
-      equip.setEquipment(EquipmentSlot.Legs, undefined);
-      equip.setEquipment(EquipmentSlot.Feet, undefined);
     }
-    offset += BATCH;
-    if (offset < total) system.runTimeout(run, 1);
-  };
 
-  run();
+    const equip = p.getComponent("minecraft:equippable");
+    if (!equip) continue;
+    equip.setEquipment(EquipmentSlot.Offhand, undefined);
+    equip.setEquipment(EquipmentSlot.Head, undefined);
+    equip.setEquipment(EquipmentSlot.Chest, undefined);
+    equip.setEquipment(EquipmentSlot.Legs, undefined);
+    equip.setEquipment(EquipmentSlot.Feet, undefined);
+  }
 }
 
 function stopGameLoop() {
@@ -396,15 +426,13 @@ function playerSetupApplyEndState(player) {
   player.removeEffect("conduit_power");
 }
 
+// === Victory
 function victoryManagerTriggerDraw() {
   if (!ctx.isRunning) return;
   ctx.isRunning = false;
-  if (ctx.checkInterval !== null) {
-    system.clearRun(ctx.checkInterval);
-    ctx.checkInterval = null;
-  }
+  stopGameLoop();
   world.gameRules.pvp = false;
-  broadcast(getAllPlayers(), { message: "[x]: No Team Survived", sound: "note.pling" });
+  broadcast(getAllPlayersCached(), { message: "[x]: No Team Survived", sound: "note.pling" });
   victoryManagerStartCountdown();
 }
 
@@ -428,15 +456,12 @@ function victoryManagerStartCountdown() {
 function victoryManagerTriggerWin(winTag) {
   if (!ctx.isRunning) return;
   ctx.isRunning = false;
-  if (ctx.checkInterval !== null) {
-    system.clearRun(ctx.checkInterval);
-    ctx.checkInterval = null;
-  }
+  stopGameLoop();
   world.gameRules.pvp = false;
 
   const teamInfo = getTeamInfo(winTag),
     teamName = teamInfo ? `${teamInfo.color}${teamInfo.name}` : winTag,
-    players = getAllPlayers();
+    players = getAllPlayersCached();
 
   for (let i = 0; i < players.length; i++) {
     const p = players[i];
@@ -450,8 +475,8 @@ function victoryManagerTriggerWin(winTag) {
       dim.spawnParticle("minecraft:huge_explosion_emitter", explosionLocPool);
     }
   }
-  showVictoryMessage(winTag, ctx.uhcTick);
 
+  showVictoryMessage(winTag, ctx.uhcTick);
   broadcast(players, {
     title: MinecraftColor.white + "VICTORY",
     subtitle: `${teamName} Wins`,
@@ -462,7 +487,7 @@ function victoryManagerTriggerWin(winTag) {
 
 function victoryManagerCheck() {
   if (!ctx.isRunning) return;
-  const players = getUhcPlayers();
+  const players = getUhcPlayersCached();
   if (!players.length) {
     victoryManagerTriggerDraw();
     return;
@@ -472,7 +497,7 @@ function victoryManagerCheck() {
     const tag = getPlayerTeam(players[i]);
     if (!tag) continue;
     aliveTeamsSet.add(tag);
-    if (aliveTeamsSet.size > 1) return;
+    if (aliveTeamsSet.size > 1) return; // early exit — ยังเหลือหลายทีม
   }
   if (aliveTeamsSet.size === 1) {
     victoryManagerTriggerWin(aliveTeamsSet.values().next().value);
@@ -481,6 +506,7 @@ function victoryManagerCheck() {
   victoryManagerTriggerDraw();
 }
 
+// === Game loop ===
 function gameLoopHandleWorldStart(tick, players) {
   if (tick > PVP_TICK + 1 || !players.length) return;
   switch (tick) {
@@ -505,7 +531,10 @@ function gameLoopHandleWorldStart(tick, players) {
       break;
     case PVP_CD3:
     case PVP_CD2:
-      broadcast({ message: dynamicToast(`PVP in ${MinecraftColor.red}${PVP_TICK - tick}`, "textures/ui/strength_effect"), sound: "note.pling" });
+      broadcast({
+        message: dynamicToast(`PVP in ${MinecraftColor.red}${PVP_TICK - tick}`, "textures/ui/strength_effect"),
+        sound: "note.pling",
+      });
       break;
     case PVP_TICK:
       world.gameRules.pvp = true;
@@ -543,10 +572,13 @@ function gameLoopRun() {
   ctx.checkInterval = system.runInterval(() => {
     if (!ctx.isRunning) return;
     ctx.uhcTick++;
-    if (ctx.uhcTick % 120 === 0) victoryManagerCheck();
-    const uhcPlayers = getUhcPlayers();
+
+    // FIX: ตรวจทุก VICTORY_CHECK_INTERVAL วินาที (~6 วิ) แทน 120 วิ
+    if (ctx.uhcTick % VICTORY_CHECK_INTERVAL === 0) victoryManagerCheck();
+
+    const uhcPlayers = getUhcPlayersCached();
     gameLoopWorldTick(uhcPlayers);
-    if (ctx.uhcTick <= 26) gameLoopPlayersTick(getAllPlayers());
+    if (ctx.uhcTick <= 26) gameLoopPlayersTick(uhcPlayers);
   }, ticks);
 }
 
@@ -556,6 +588,7 @@ export function markAliveTeamDirty() {
 
 registerAliveTeamDirtyHandler(markAliveTeamDirty);
 
+// === startGameUhc
 export function startGameUhc() {
   if (ctx.isRunning) return;
   stopGameLoop();
@@ -566,45 +599,31 @@ export function startGameUhc() {
   ctx.uhcTick = 0;
   ctx.cachedDimension = world.getDimension("overworld");
 
-  const players = world.getPlayers();
-  const total = players.length;
-  let idx = 0;
-  function applyBatch() {
-    const end = Math.min(idx + 5, total);
-    for (; idx < end; idx++) playerSetupApplyStartState(players[idx]);
-    if (idx < total) {
-      system.runTimeout(applyBatch, 1);
-    } else {
-      // refreshPlayerCaches หลัง applyBatch เสร็จทุกคนแล้ว
-      // เพื่อให้ uhcPlayersCache มี tag "uhc" ครบก่อน teleport (tick=1)
-      refreshPlayerCaches();
-    }
-  }
-  applyBatch();
   safeYCache.clear();
-  if (teleportManagerRunQueue._abortHandlers) {
-    teleportManagerRunQueue._abortHandlers.forEach((fn) => fn());
-    teleportManagerRunQueue._abortHandlers = [];
-  }
 
-  if (playerSetupClearItemsKeepCompass._token) {
-    playerSetupClearItemsKeepCompass._token.cancelled = true;
-  }
+  for (let i = 0; i < teleportQueueAbortHandlers.length; i++) teleportQueueAbortHandlers[i]();
+  teleportQueueAbortHandlers.length = 0;
+
   resetBorderState();
   resetUiState();
   scoreboardInit();
+
+  const players = world.getPlayers();
+
+  for (let i = 0; i < players.length; i++) {
+    playerSetupApplyStartState(players[i]);
+  }
+
+  refreshPlayerCaches();
   gameLoopRun();
   playerSetupClearItemsKeepCompass();
 }
 
+// === endGameUhc ===
 export function endGameUhc() {
   const prevShowCoordinates = ctx.prevShowCoordinates;
   stopGameLoop();
   countdownRunning = false;
-
-  if (playerSetupClearItemsKeepCompass._token) {
-    playerSetupClearItemsKeepCompass._token.cancelled = true;
-  }
 
   fillReset();
   endSequenceReset();
@@ -624,6 +643,8 @@ export function endGameUhc() {
   borderManagerSyncGeometry();
 }
 
+// === resetGameUhc ===
+
 export function resetGameUhc() {
   const prevShowCoordinates = ctx.prevShowCoordinates;
   stopGameLoop();
@@ -631,14 +652,9 @@ export function resetGameUhc() {
   fillReset();
   resetContext(ctx);
   endSequenceReset();
-  if (teleportManagerRunQueue._abortHandlers) {
-    teleportManagerRunQueue._abortHandlers.forEach((fn) => fn());
-    teleportManagerRunQueue._abortHandlers = [];
-  }
 
-  if (playerSetupClearItemsKeepCompass._token) {
-    playerSetupClearItemsKeepCompass._token.cancelled = true;
-  }
+  for (let i = 0; i < teleportQueueAbortHandlers.length; i++) teleportQueueAbortHandlers[i]();
+  teleportQueueAbortHandlers.length = 0;
 
   clearAllPlayerNametags();
   borderManagerSyncGeometry();

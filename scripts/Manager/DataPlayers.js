@@ -1,7 +1,7 @@
 import { system, world } from "@minecraft/server";
 import { formatPlayerCache, addToCache, removeFromCache } from "./DataHelpers";
 
-const TEAMS = Object.freeze([
+export const TEAMS = Object.freeze([
   { tag: "team1", name: "Red", color: "§c", icon: "textures/items/dye_powder_red" },
   { tag: "team2", name: "Blue", color: "§9", icon: "textures/items/dye_powder_blue_new" },
   { tag: "team3", name: "Yellow", color: "§e", icon: "textures/items/dye_powder_yellow" },
@@ -16,7 +16,6 @@ const TEAMS = Object.freeze([
 // ===== Runtime Player Data =====
 const playerStore = new Map();
 let allPlayersCache = [];
-let allPlayersCacheIds = [];
 let uhcPlayersCache = [];
 
 function ensurePlayer(playerId) {
@@ -49,7 +48,10 @@ export const RuntimeStore = {
   },
 
   has(playerId, dataKey) {
-    return dataKey in (playerStore.get(playerId) ?? {});
+    const playerData = playerStore.get(playerId);
+    if (!playerData) return false;
+
+    return Object.prototype.hasOwnProperty.call(playerData, dataKey);
   },
 
   clearKey(dataKey) {
@@ -84,7 +86,7 @@ export const RuntimeStore = {
 // ===== Persistent Player Data =====
 const DEFAULT_STATS = {
   name: "",
-  teamId: "",
+  teamId: null,
   playTime: 0,
   kills: 0,
   deaths: 0,
@@ -95,26 +97,46 @@ const DEFAULT_STATS = {
 let worldPropertyStore = null;
 
 function loadStore() {
-  if (!worldPropertyStore) {
-    const raw = world.getDynamicProperty("UhcPlayerworldProperty");
-    worldPropertyStore = raw ? JSON.parse(raw) : {};
+  if (worldPropertyStore) return worldPropertyStore;
+
+  const raw = world.getDynamicProperty("UhcPlayerworldProperty");
+
+  if (!raw) {
+    worldPropertyStore = {};
+    return worldPropertyStore;
   }
+
+  try {
+    worldPropertyStore = JSON.parse(raw);
+  } catch (e) {
+    console.warn("[STORE] JSON parse failed, resetting store:", e);
+    worldPropertyStore = {};
+  }
+
   return worldPropertyStore;
 }
 
 function saveStore() {
-  if (worldPropertyStore) {
-    world.setDynamicProperty("UhcPlayerworldProperty", JSON.stringify(worldPropertyStore));
+  if (!worldPropertyStore) return;
+
+  try {
+    const json = JSON.stringify(worldPropertyStore);
+    world.setDynamicProperty("UhcPlayerworldProperty", json);
+  } catch (e) {
+    console.warn("[STORE] save failed:", e);
   }
 }
 
 function getWorldProperty(playerId) {
   const dataStore = loadStore();
-  if (!dataStore[playerId]) {
-    dataStore[playerId] = { ...DEFAULT_STATS };
+
+  let playerStats = dataStore[playerId];
+  if (!playerStats) {
+    playerStats = Object.assign({}, DEFAULT_STATS);
+    dataStore[playerId] = playerStats;
   }
 
-  return dataStore[playerId];
+  return playerStats;
 }
 
 function setWorldProperty(playerId, newData) {
@@ -123,22 +145,74 @@ function setWorldProperty(playerId, newData) {
   saveStore();
 }
 
-function updateWorldProperty(playerId, patchData) {
+function normalizeTeamId(teamId) {
+  return teamId && teamId !== "" ? teamId : null;
+}
+
+// อัปเดตข้อมูล player ลง world (แบบ partial update / patch)
+export function updateWorldProperty(playerId, patchData) {
   const dataStore = loadStore();
+
   let playerStats = dataStore[playerId];
   if (!playerStats) {
-    playerStats = { ...DEFAULT_STATS };
+    playerStats = Object.assign({}, DEFAULT_STATS);
     dataStore[playerId] = playerStats;
   }
-  for (const key in patchData) {
-    playerStats[key] = patchData[key];
+
+  if (patchData.name !== undefined) {
+    playerStats.name = patchData.name;
   }
+
+  if (patchData.teamId !== undefined) {
+    playerStats.teamId = normalizeTeamId(patchData.teamId);
+  }
+
+  if (patchData.playTime !== undefined) {
+    playerStats.playTime = Number(patchData.playTime) || 0;
+  }
+
+  if (patchData.kills !== undefined) {
+    playerStats.kills = Number(patchData.kills) || 0;
+  }
+
+  if (patchData.deaths !== undefined) {
+    playerStats.deaths = Number(patchData.deaths) || 0;
+  }
+
+  if (patchData.isUhc !== undefined) {
+    playerStats.isUhc = Boolean(patchData.isUhc);
+  }
+
+  if (patchData.isAlive !== undefined) {
+    playerStats.isAlive = Boolean(patchData.isAlive);
+  }
+
   saveStore();
 }
 
+function applyPlayerTeam(player, statsData) {
+  if (!player?.isValid) return;
+  const teamId = statsData.teamId;
+  if (!teamId) return;
+  RuntimeStore.set(player.id, "teamId", teamId);
+  const tags = [...player.getTags()];
+  for (const tag of tags) {
+    if (tag.startsWith("team") && tag !== teamId) {
+      player.removeTag(tag);
+    }
+  }
+
+  if (teamId && !tags.includes(teamId)) {
+    player.addTag(teamId);
+  }
+}
+
+// =================================================
+// Player Spawn
+// =================================================
 world.afterEvents.playerSpawn.subscribe((event) => {
   const player = event.player;
-  if (!player) return;
+  if (!player?.isValid) return;
 
   const playerId = player.id;
 
@@ -152,12 +226,13 @@ world.afterEvents.playerSpawn.subscribe((event) => {
   //Persistent Stats
   const statsData = getWorldProperty(playerId);
   statsData.name = player.name;
-  updateWorldProperty(playerId, statsData);
+  updateWorldProperty(playerId, { name: statsData.name });
+  applyPlayerTeam(player, statsData);
 
   // Cache Update
   addToCache(allPlayersCache, playerId, player.name);
 
-  if (player.hasTag("uhc")) {
+  if (statsData.isUhc) {
     addToCache(uhcPlayersCache, playerId, player.name);
   }
 
@@ -171,6 +246,9 @@ world.afterEvents.playerSpawn.subscribe((event) => {
   console.warn("[SPAWN] tags:", player.getTags().join(", "));
 });
 
+// =================================================
+// player Leave
+// =================================================
 world.afterEvents.playerLeave.subscribe(({ playerId }) => {
   if (!playerId) return;
 

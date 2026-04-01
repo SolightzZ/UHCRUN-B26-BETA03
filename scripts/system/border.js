@@ -2,6 +2,7 @@ import { system, world } from "@minecraft/server";
 
 // @ts-ignore
 import { getUhcPlayers, isPlayerUhcId } from "../Manager/TeamManager.js";
+export { getAllPlayers, getUhcPlayers } from "../Manager/TeamManager.js";
 
 // @ts-ignore
 import { dynamicToast } from "../plugin/Util.js";

@@ -903,9 +903,12 @@ function onSpawn(ev) {
   if (!dynamicTeam) return;
 
   const inCache = playerTeamCache.has(player.id);
+  // Bug fix: บวก teamCounts เฉพาะกรณี player ยังไม่อยู่ใน cache
+  // (reconnect / respawn ซ้ำไม่ควรบวกซ้ำ)
   if (!inCache && shouldTrackTeamRuntime(player)) {
     const before = teamCounts.get(dynamicTeam) ?? 0;
     teamCounts.set(dynamicTeam, before + 1);
+    teamPlayerIndex.get(dynamicTeam)?.add(player.id);
     updateSidebar(dynamicTeam);
   }
 
@@ -963,6 +966,14 @@ function onChat(ev) {
 
 // Action Form Data
 function openTeamMenu(player) {
+  // ── บล็อกเมนูทีมระหว่างเกมดำเนินอยู่ ─────────────────────────────────────
+  // player ที่มี tag "uhc" = กำลังเล่นอยู่ → ห้ามเปลี่ยนทีม
+  // Admin ไม่บล็อก (hasTag("uhc") และ hasTag("admin") สามารถใช้ Admin Menu แทน)
+  if (isGameRunning && player.hasTag("uhc") && !player.hasTag(CONFIG.adminTag)) {
+    player.sendMessage(dynamicToast("§cไม่สามารถเปลี่ยนทีมระหว่างเกมได้", "textures/ui/cancel"));
+    player.playSound("note.bassattack");
+    return;
+  }
   const form = new ActionFormData();
   form.title(CONFIG.title + "Team Manager");
   const currentTeamId = getPlayerTeam(player),

@@ -1,12 +1,4 @@
-import {
-  world,
-  system,
-  GameMode,
-  InputPermissionCategory,
-  Difficulty,
-  ItemStack,
-  CommandPermissionLevel,
-} from "@minecraft/server";
+import { world, system, GameMode, InputPermissionCategory, Difficulty, ItemStack, CommandPermissionLevel } from "@minecraft/server";
 import { startGameUhc, endGameUhc, resetGameUhc } from "../system/border";
 import { tpa, openMainMenu } from "../Manager/TeamManager";
 
@@ -23,8 +15,8 @@ export const SPAWN_CONFIG = Object.freeze({
 
 const SETUP_RESET_EFFECTS = Object.freeze([
   { type: "regeneration", duration: 500 },
-  { type: "resistance",   duration: 500 },
-  { type: "saturation",   duration: 500 },
+  { type: "resistance", duration: 500 },
+  { type: "saturation", duration: 500 },
 ]);
 
 //=================================
@@ -38,10 +30,10 @@ const SETUP_RESET_EFFECTS = Object.freeze([
  */
 function batch({ step, budget = 1 }) {
   // ไม่เก็บ snapshot ไว้นอก — ดึง fresh list และ index แบบ closure
+  const players = world.getPlayers();
   let i = 0;
   const run = system.runInterval(() => {
     // ดึงใหม่ทุกรอบเพื่อให้ list เป็น live
-    const players = world.getPlayers();
     // reset index ถ้า list ใหม่สั้นกว่า (เช่น มีคน disconnect)
     if (i >= players.length) {
       system.clearRun(run);
@@ -86,14 +78,8 @@ function applyEffects(player, effects = []) {
 function setPlayerSpawn(player) {
   player.playSound("spawn");
   player.setGameMode(GameMode.Adventure);
-  player.inputPermissions.setPermissionCategory(
-    InputPermissionCategory.Movement,
-    true
-  );
-  player.teleport(
-    { x: SPAWN_CONFIG.x, y: SPAWN_CONFIG.y, z: SPAWN_CONFIG.z },
-    { dimension: world.getDimension(SPAWN_CONFIG.dimension) }
-  );
+  player.inputPermissions.setPermissionCategory(InputPermissionCategory.Movement, true);
+  player.teleport({ x: SPAWN_CONFIG.x, y: SPAWN_CONFIG.y, z: SPAWN_CONFIG.z }, { dimension: world.getDimension(SPAWN_CONFIG.dimension) });
 }
 
 //==================================
@@ -114,19 +100,9 @@ const reset = setupOrReset;
 function end(player) {
   setItemPlayer(player);
   applyEffects(player, [{ type: "regeneration", duration: 255 }]);
+  player.addLevels(-10000);
 
-  // player.resetLevel() ไม่มีใน Vanilla Bedrock Scripting API
-  // ใช้ runCommand เพื่อ reset XP แทน
-  try {
-    player.runCommand("xp -10000L @s");
-  } catch {
-    // ignore หาก command พัง (เช่น สิทธิ์)
-  }
-
-  player.inputPermissions.setPermissionCategory(
-    InputPermissionCategory.Movement,
-    true
-  );
+  player.inputPermissions.setPermissionCategory(InputPermissionCategory.Movement, true);
 }
 
 //==================================
@@ -156,7 +132,7 @@ function uhcSetup() {
       "§f Official Competitive UHC Event\n" +
       "§f Hosted by Sleeplite Server\n" +
       "§9 Community: discord.gg/gtqfbmvTJK\n" +
-      "§7------------------------------"
+      "§7------------------------------",
   );
 
   cmd("structure load uhc1 569 100 569");
@@ -166,18 +142,18 @@ function uhcSetup() {
   cmd("clearspawnpoint @a");
 
   world.gameRules.sendCommandFeedback = false;
-  world.gameRules.commandBlockOutput   = false;
-  world.gameRules.naturalRegeneration  = true;
-  world.gameRules.doImmediateRespawn   = true;
-  world.gameRules.showCoordinates      = false;
-  world.gameRules.doWeatherCycle       = false;
-  world.gameRules.doMobSpawning        = false;
-  world.gameRules.mobGriefing          = false;
-  world.gameRules.fallDamage           = false;
-  world.gameRules.doMobLoot            = false;
-  world.gameRules.spawnRadius          = 1;
-  world.gameRules.pvp                  = false;
-  world.gameRules.locatorBar           = false;
+  world.gameRules.commandBlockOutput = false;
+  world.gameRules.naturalRegeneration = true;
+  world.gameRules.doImmediateRespawn = true;
+  world.gameRules.showCoordinates = false;
+  world.gameRules.doWeatherCycle = false;
+  world.gameRules.doMobSpawning = false;
+  world.gameRules.mobGriefing = false;
+  world.gameRules.fallDamage = false;
+  world.gameRules.doMobLoot = false;
+  world.gameRules.spawnRadius = 1;
+  world.gameRules.pvp = false;
+  world.gameRules.locatorBar = false;
   world.setDifficulty(Difficulty.Peaceful);
 
   batch({ step: setup, budget: 1 });
@@ -191,12 +167,12 @@ function uhcReset() {
   resetGameUhc();
 
   world.gameRules.naturalRegeneration = true;
-  world.gameRules.showCoordinates     = false;
-  world.gameRules.doMobSpawning       = false;
-  world.gameRules.mobGriefing         = false;
-  world.gameRules.fallDamage          = false;
-  world.gameRules.doMobLoot           = false;
-  world.gameRules.pvp                 = false;
+  world.gameRules.showCoordinates = false;
+  world.gameRules.doMobSpawning = false;
+  world.gameRules.mobGriefing = false;
+  world.gameRules.fallDamage = false;
+  world.gameRules.doMobLoot = false;
+  world.gameRules.pvp = false;
   world.setDifficulty(Difficulty.Peaceful);
 
   batch({ step: reset, budget: 1 });
@@ -209,12 +185,12 @@ function uhcStart() {
   startGameUhc();
 
   world.gameRules.naturalRegeneration = false;
-  world.gameRules.showCoordinates     = true;
-  world.gameRules.doMobSpawning       = true;
-  world.gameRules.mobGriefing         = true;
-  world.gameRules.fallDamage          = true;
-  world.gameRules.doMobLoot           = true;
-  world.gameRules.pvp                 = false;
+  world.gameRules.showCoordinates = true;
+  world.gameRules.doMobSpawning = true;
+  world.gameRules.mobGriefing = true;
+  world.gameRules.fallDamage = true;
+  world.gameRules.doMobLoot = true;
+  world.gameRules.pvp = false;
   world.setDifficulty(Difficulty.Normal);
   world.setTimeOfDay(22999);
 }
@@ -226,10 +202,10 @@ function uhcEnd() {
 
   endGameUhc();
 
-  world.gameRules.pvp                 = false;
-  world.gameRules.fallDamage          = false;
-  world.gameRules.mobGriefing         = false;
-  world.gameRules.showCoordinates     = false;
+  world.gameRules.pvp = false;
+  world.gameRules.fallDamage = false;
+  world.gameRules.mobGriefing = false;
+  world.gameRules.showCoordinates = false;
   world.gameRules.naturalRegeneration = true;
   world.setDifficulty(Difficulty.Peaceful);
 
@@ -242,27 +218,27 @@ function uhcEnd() {
 
 export const CommandMap = {
   "addon:uhcsetup": {
-    handler:    uhcSetup,
+    handler: uhcSetup,
     permission: CommandPermissionLevel.GameDirectors,
   },
   "addon:uhcreset": {
-    handler:    uhcReset,
+    handler: uhcReset,
     permission: CommandPermissionLevel.GameDirectors,
   },
   "addon:uhcstart": {
-    handler:    uhcStart,
+    handler: uhcStart,
     permission: CommandPermissionLevel.GameDirectors,
   },
   "addon:uhcend": {
-    handler:    uhcEnd,
+    handler: uhcEnd,
     permission: CommandPermissionLevel.GameDirectors,
   },
   "addon:tpa": {
-    handler:    tpa,
+    handler: tpa,
     permission: CommandPermissionLevel.Any,
   },
   "addon:gui": {
-    handler:    openMainMenu,
+    handler: openMainMenu,
     permission: CommandPermissionLevel.GameDirectors,
   },
 };
