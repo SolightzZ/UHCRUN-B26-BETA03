@@ -11,8 +11,6 @@
 | Execution | Async execution           | ใช้ system.run ป้องกัน crash |
 | Error     | Error handling + feedback | แจ้ง error กลับ player       |
 
-อ้างอิง:
-
 ---
 
 ## function.js (Command Logic / Utilities)
@@ -27,8 +25,6 @@
 | Effects   | Apply effects          | ให้ effect               |
 | Inventory | Starter item           | แจก compass              |
 | World     | Command executor       | run command ใน dimension |
-
-อ้างอิง:
 
 ---
 
@@ -57,8 +53,6 @@
 | Cache     | GlobalPlayerCaches       | cache global     |
 | Runtime   | Alive team dirty handler | update UI        |
 
-อ้างอิง:
-
 ---
 
 ## Leaderboard.js (Leaderboard UI)
@@ -73,8 +67,6 @@
 | Entity   | NPC display       | แสดงผ่าน entity  |
 | Sorting  | Dynamic sort      | เรียงข้อมูล      |
 | Update   | Interval refresh  | อัปเดตอัตโนมัติ  |
-
-อ้างอิง:
 
 ---
 
@@ -99,8 +91,6 @@
 | Chunk       | Chunk awareness         | ตรวจ chunk        |
 | Metrics     | Runtime metrics         | วัด performance   |
 
-อ้างอิง:
-
 ---
 
 ## border.js (Enforcement Layer)
@@ -119,8 +109,6 @@
 | Anti Cheat | Out-of-map prevent      | กันออก           |
 | Filter     | UHC filter              | เฉพาะ UHC        |
 | Notify     | Broadcast               | แจ้งเตือน        |
-
-อ้างอิง:
 
 ---
 
@@ -146,8 +134,6 @@
 | Sync     | Geometry sync      | sync             |
 | Compute  | Next shrink calc   | คำนวณ            |
 | Display  | Sidebar system     | sidebar          |
-
-อ้างอิง:
 
 ---
 
@@ -175,8 +161,6 @@
 | Effects      | Apply effects   | effect           |
 | Border       | Border sync     | เชื่อม           |
 | Cache        | Player cache    | ลด lag           |
-
-อ้างอิง:
 
 ---
 
