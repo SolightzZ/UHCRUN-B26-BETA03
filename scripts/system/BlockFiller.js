@@ -655,8 +655,8 @@ export function fillReset() {
   queueHead = 0;
   pendingBlocks = 0;
   lastRandomIndex = -1;
-  _pattern1Queued = false;
-  _pattern2Queued = false;
+  pattern1Queued = false;
+  pattern2Queued = false;
 }
 
 function fillIsIdle() {
@@ -800,13 +800,13 @@ export function runEndPattern3(player) {
   }
 }
 
-let _pattern1Queued = false;
-let _pattern2Queued = false;
+let pattern1Queued = false;
+let pattern2Queued = false;
 
 export function runEndPattern1(player) {
-  if (_pattern1Queued) return;
+  if (pattern1Queued) return;
   if (!player?.isValid) return;
-  _pattern1Queued = true;
+  pattern1Queued = true;
   const dim = player.dimension;
   const pattern = PATTERN_1_TASK;
   for (let y = WORLD_MAX_Y; y >= WORLD_MIN_Y; y--) {
@@ -817,9 +817,9 @@ export function runEndPattern1(player) {
 }
 
 export function runEndPattern2(player) {
-  if (_pattern2Queued) return;
+  if (pattern2Queued) return;
   if (!player?.isValid) return;
-  _pattern2Queued = true;
+  pattern2Queued = true;
   const dim = player.dimension;
   const pattern = PATTERN_2_TASK;
   for (let y = WORLD_MIN_Y; y <= WORLD_MAX_Y; y++) {

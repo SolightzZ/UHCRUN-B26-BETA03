@@ -11,7 +11,7 @@ import {
   registerAliveTeamDirtyHandler,
   refreshPlayerCaches,
   refreshScoreboardUI,
-  resetAnnouncerSystem,
+  resetAnnouncer,
   setGameRunningState,
   showVictoryMessage,
 } from "../Manager/TeamManager.js";
@@ -21,8 +21,9 @@ import { spawnLeaderboardNPC } from "../Manager/Leaderboard.js";
 
 // @ts-ignore
 import { dynamicToast } from "../plugin/Util.js";
-
+// @ts-ignore
 import { fillReset } from "./BlockFiller.js";
+// @ts-ignore
 import {
   borderManagerSyncGeometry,
   borderManagerTick,
@@ -697,7 +698,7 @@ export function endGameUhc() {
   }
 
   scoreboardClear();
-  resetAnnouncerSystem();
+  resetAnnouncer();
   setGameRunningState(false);
   refreshScoreboardUI();
 
