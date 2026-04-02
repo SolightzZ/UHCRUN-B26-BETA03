@@ -1,4 +1,4 @@
-import { DisplaySlotId, EntityDamageCause, MolangVariableMap, ObjectiveSortOrder, world } from "@minecraft/server";
+﻿import { DisplaySlotId, EntityDamageCause, MolangVariableMap, ObjectiveSortOrder, world } from "@minecraft/server";
 
 // @ts-ignore
 import { getAllPlayers, getPlayerTeam, getTeams, getUhcPlayers } from "../Manager/TeamManager.js";
@@ -7,6 +7,7 @@ import { dynamicToast } from "../plugin/Util.js";
 // @ts-ignore
 import { fillHasPendingWork, getEndSequenceLabel, getEndSequenceStep, shouldAdvanceEndSequence, END_SEQUENCE_STATE } from "./BlockFiller.js";
 
+// ชุดไอคอนสำหรับใช้แสดงผลในข้อความและ scoreboard
 export const icons = Object.freeze({
   Sword: "",
   Bow: "",
@@ -27,6 +28,7 @@ export const icons = Object.freeze({
   Hourglass: "",
 });
 
+// รหัสสีข้อความของ Minecraft สำหรับประกอบ UI
 export const MinecraftColor = Object.freeze({
   black: "§0",
   darkBlue: "§1",
@@ -50,35 +52,52 @@ export const MinecraftColor = Object.freeze({
 });
 
 let TEAMS = [];
+// ดึงทีมแบบ cache เพื่อลดการเรียกข้อมูลซ้ำ
 function getTeamsCached() {
   if (!TEAMS.length) TEAMS = getTeams();
   return TEAMS;
 }
 
+// ลำดับรัศมีของ border ที่จะหดลงตามช่วงเกม
 export const CHECKPOINTS = [500, 450, 400, 350, 300, 250, 200, 150, 100, 80, 50, 25, 16, 10, 5, 2];
+
+// ค่ารัศมีสุดท้ายของ border
 export const borderEnd = CHECKPOINTS[CHECKPOINTS.length - 1];
 
+// ค่าคงที่สำหรับการเรนเดอร์ particle ของ border
 const BORDER_RENDER = Object.freeze({
   VIEW_DISTANCE: 35,
   PARTICLE_Y: 100,
 });
 
+// ชุดสีของ border แยกตามสถานะปกติและตอนกำลังหด
 export const borderColors = {
   blue: { red: 0, green: 0.54, blue: 1, alpha: 1.0 },
   red: { red: 1.0, green: 0.2, blue: 0.2, alpha: 1.0 },
 };
 
+// ค่าเวลาแสดงผล title บนหน้าจอผู้เล่น
 const titleConfig = Object.freeze({ stayDuration: 200, fadeInDuration: 10, fadeOutDuration: 20 });
+
+// ค่าเริ่มต้นของเสียงที่ใช้ตอน broadcast
 const soundConfig = Object.freeze({ volume: 0.8, pitch: 1 });
 
+// ชื่อ particle สำหรับเรนเดอร์ border ตามแต่ละแกน
 const worldborder_ew = "worldborder:worldborder_ew";
 const worldborder = "worldborder:worldborder";
+
+// ชื่อ objective ของ scoreboard
 const uhc = "uhc";
+
+// ชื่อแสดงผลของ objective พร้อมสี
 const uhcName = MinecraftColor.h + MinecraftColor.n + "UhcRun26";
 
+// จำนวน tick ต่อวินาทีของเกม
 export const ticks = 20;
+// จุดศูนย์กลางของ border
 export const center = { x: 0, z: 0 };
 
+// สร้าง state กลางของระบบ border และ UI
 export function GameContext() {
   return {
     isRunning: false,
@@ -109,15 +128,20 @@ export function GameContext() {
   };
 }
 
+// รีเซ็ต context เป้าหมายกลับเป็นค่าเริ่มต้นทั้งหมด
 export function resetContext(target) {
   const fresh = GameContext();
   const keys = Object.keys(fresh);
   for (let i = 0; i < keys.length; i++) target[keys[i]] = fresh[keys[i]];
 }
 
+// context กลางที่ใช้ร่วมกันภายในโมดูลนี้
 export const ctx = GameContext();
 
+// cache ข้อความแต่ละบรรทัดของ scoreboard
 const scoreCache = new Map();
+
+// object สำหรับ title options ที่นำกลับมาใช้ซ้ำ
 const reusableTitleOptions = {
   stayDuration: titleConfig.stayDuration,
   fadeInDuration: titleConfig.fadeInDuration,
@@ -125,6 +149,7 @@ const reusableTitleOptions = {
   subtitle: "",
 };
 
+// กำหนดเวลาหดและเวลาพักของ border ในแต่ละช่วงรัศมี
 const SHRINK_CONFIG = [
   [200, 80, 90],
   [100, 60, 60],
@@ -134,35 +159,57 @@ const SHRINK_CONFIG = [
   [0, 20, 15],
 ];
 
-const groupMaps = new Map(),
-  groupsPool = [],
-  spawnedThisTick = new Set(),
-  sharedPos = { x: 0, y: BORDER_RENDER.PARTICLE_Y, z: 0 },
-  particleLocPool = { x: 0, y: 0, z: 0 };
+// เก็บกลุ่มผู้เล่นสำหรับ render particle
+const groupMaps = new Map();
+// pool สำหรับ reuse กลุ่ม ลดการสร้าง object ใหม่
+const groupsPool = [];
+// track particle ที่ spawn ใน tick นี้
+const spawnedThisTick = new Set();
+// ตำแหน่งกลางที่ใช้ร่วมกัน (ลดการสร้าง object)
+const sharedPos = { x: 0, y: BORDER_RENDER.PARTICLE_Y, z: 0 };
+// object ตำแหน่งสำหรับ particle (reuse)
+const particleLocPool = { x: 0, y: 0, z: 0 };
 
 let groupsLen = 0;
+// จำนวนกลุ่มผู้เล่นสูงสุดที่เก็บไว้ต่อ tick
 const GROUPS_POOL_CAP = 64;
 
+// config ความเสียหายเมื่อผู้เล่นออกนอก border
 const configDamage = { cause: EntityDamageCause.void };
+// ดาเมจสูงสุดที่ทำต่อรอบ
 const MAX_DAMAGE = 5;
+// สัดส่วนระยะแบบนอก border ที่แปลงเป็นดาเมจ
 const DAMAGE_SCALE = 0.2;
 
+// ค่าขนาด cell สำหรับรวมกลุ่มผู้เล่นใกล้กัน
 const CELL_SIZE = 16;
 const CELL_OFFSET = 32;
 const CELL_RANGE = 64;
 
+// ======================================================
+// Look up Shrink Config (หา config การหดที่เหมาะกับรัศมีเป้าหมาย)
+// ======================================================
 function lookupShrinkConfig(target) {
   return SHRINK_CONFIG.find((c) => target >= c[0]) || SHRINK_CONFIG[SHRINK_CONFIG.length - 1];
 }
 
+// ======================================================
+// Border Manager Get Shrink Duration (คืนเวลาที่ใช้หด border ไปยังรัศมีเป้าหมาย)
+// ======================================================
 export function borderManagerGetShrinkDuration(target) {
   return lookupShrinkConfig(target)[1];
 }
 
+// ======================================================
+// Border Manager Get Rest Time (คืนเวลาพักก่อนเริ่มการหดรอบถัดไป)
+// ======================================================
 function borderManagerGetRestTime(target) {
   return lookupShrinkConfig(target)[2];
 }
 
+// ======================================================
+// Reset Border State (รีเซ็ตสถานะ border ให้กลับสู่ค่าเริ่มต้นของเกม)
+// ======================================================
 export function resetBorderState() {
   ctx.nextShrinkIndex = 1;
   ctx.nextShrinkTick = 300;
@@ -179,6 +226,9 @@ export function resetBorderState() {
   borderManagerSyncGeometry();
 }
 
+// ======================================================
+// Reset Ui State (รีเซ็ต cache และสถานะของ UI / scoreboard)
+// ======================================================
 export function resetUiState() {
   ctx.aliveTeamDirty = true;
   ctx.aliveTeamBarCache = MinecraftColor.gray + "-";
@@ -188,6 +238,9 @@ export function resetUiState() {
   scoreCache.clear();
 }
 
+// ======================================================
+// Scoreboard Init (สร้าง scoreboard ใหม่และผูกกับ sidebar)
+// ======================================================
 export function scoreboardInit() {
   const score = world.scoreboard;
   const old = score.getObjective(uhc);
@@ -198,6 +251,9 @@ export function scoreboardInit() {
   scoreCache.clear();
 }
 
+// ======================================================
+// Scoreboard Clear (ล้าง scoreboard ออกจาก sidebar และเคลียร์ objective เดิม)
+// ======================================================
 export function scoreboardClear() {
   const sb = world.scoreboard;
   sb.clearObjectiveAtDisplaySlot(DisplaySlotId.Sidebar);
@@ -209,10 +265,16 @@ export function scoreboardClear() {
 
 const LINE_ID_SUFFIX = Array.from({ length: 10 }, (_, i) => "§r".repeat(i + 1));
 
+// ======================================================
+// Scoreboard Make Line Id(สร้าง id เฉพาะสำหรับ participant ของแต่ละบรรทัด)
+// ======================================================
 function scoreboardMakeLineId(text, index) {
   return `${text}${LINE_ID_SUFFIX[index] ?? "§r".repeat(index + 1)}`;
 }
 
+// ======================================================
+// Scoreboard Update Line (อัปเดตบรรทัด scoreboard เฉพาะเมื่อค่ามีการเปลี่ยนจริง)
+// ======================================================
 function scoreboardUpdateLine(obj, index, text) {
   const cache = scoreCache;
   const old = cache.get(index);
@@ -225,6 +287,9 @@ function scoreboardUpdateLine(obj, index, text) {
   cache.set(index, text);
 }
 
+// ======================================================
+// Scoreboard Compute Next Label (คำนวณข้อความเวลาของเหตุการณ์ border ถัดไป)
+// ======================================================
 function scoreboardComputeNextLabel() {
   const t = ctx.uhcTick;
 
@@ -241,12 +306,18 @@ function scoreboardComputeNextLabel() {
   return r > 0 ? `${r}s` : `${MinecraftColor.darkBlue}NOW`;
 }
 
+// ======================================================
+// Scoreboard Compute Next Border (คำนวณรัศมี border ถัดไปที่ควรแสดง)
+// ======================================================
 function scoreboardComputeNextBorder() {
   if (ctx.targetRadius != null) return ctx.targetRadius;
   if (ctx.nextShrinkIndex >= CHECKPOINTS.length) return borderEnd;
   return CHECKPOINTS[ctx.nextShrinkIndex];
 }
 
+// ======================================================
+// Scoreboard Collect Alive Teams (รวมรายชื่อทีมที่ยังมีผู้เล่นรอดอยู่)
+// ======================================================
 function scoreboardCollectAliveTeams(players) {
   const aliveTeams = new Set();
 
@@ -260,6 +331,9 @@ function scoreboardCollectAliveTeams(players) {
   return aliveTeams;
 }
 
+// ======================================================
+// Scoreboard Get Alive Team Bar (สร้างแถบสีแทนทีมที่ยังรอดสำหรับแสดงบน scoreboard)
+// ======================================================
 function scoreboardGetAliveTeamBar(players) {
   if (ctx.aliveTeamDirty) {
     const aliveTeams = scoreboardCollectAliveTeams(players);
@@ -287,6 +361,9 @@ function scoreboardGetAliveTeamBar(players) {
   return ctx.aliveTeamBarCache;
 }
 
+// ======================================================
+// Scoreboard GetGame State (คืนสัญลักษณ์สถานะปัจจุบันของเกม)
+// ======================================================
 function scoreboardGetGameState() {
   if (!ctx.isRunning) return `${icons.Hourglass}`;
   if (ctx.uhcTick < 30) return `?`;
@@ -295,6 +372,9 @@ function scoreboardGetGameState() {
   return `?`;
 }
 
+// ======================================================
+// Scoreboard Update (อัปเดตข้อมูลทุกบรรทัดของ scoreboard ตาม state ปัจจุบัน)
+// ======================================================
 export function scoreboardUpdate(obj, uhcPlayers) {
   const c = ctx.targetRadius !== null ? MinecraftColor.red : MinecraftColor.white,
     pCount = uhcPlayers.length;
@@ -316,6 +396,9 @@ export function scoreboardUpdate(obj, uhcPlayers) {
   scoreboardUpdateLine(obj, 4, scoreboardGetGameState());
 }
 
+// ======================================================
+// Border Manager Sync Geometry (ซิงก์ขอบเขต Axis-Aligned Bounding Box ของ border จากรัศมีปัจจุบัน)
+// ======================================================
 export function borderManagerSyncGeometry() {
   const r = ctx.borderRadius,
     cx = center.x,
@@ -323,6 +406,9 @@ export function borderManagerSyncGeometry() {
   ctx.wbBounds = [cx + r, cx - r, cz - r, cz + r];
 }
 
+// ======================================================
+// Border Manager Set Radius (ตั้งค่ารัศมี border โดยไม่ให้ต่ำกว่าค่าสุดท้าย)
+// ======================================================
 export function borderManagerSetRadius(r) {
   const clamped = Math.max(r, borderEnd);
   if (clamped === ctx.borderRadius && ctx.wbBounds) return;
@@ -330,12 +416,18 @@ export function borderManagerSetRadius(r) {
   borderManagerSyncGeometry();
 }
 
+// ======================================================
+// Border Manager Is Out side (ตรวจสอบว่าพิกัดอยู่ด้านนอก border หรือไม่)
+// ======================================================
 export function borderManagerIsOutside(x, z) {
   const b = ctx.wbBounds;
   if (!b) return false;
   return x < b[1] || x > b[0] || z < b[2] || z > b[3];
 }
 
+// ======================================================
+// Border Manager Tick Shrink (อัปเดตรัศมี border ระหว่างช่วงกำลังหดทีละ tick)
+// ======================================================
 export function borderManagerTickShrink() {
   if (ctx.targetRadius === null || ctx.shrinkDuration <= 0) return;
   const elapsed = ctx.uhcTick - ctx.shrinkStartTick,
@@ -353,6 +445,9 @@ export function borderManagerTickShrink() {
   }
 }
 
+// ======================================================
+// Border Manager Apply Shrink (เริ่มลดลง border รอบถัดไปและแจ้งผู้เล่น)
+// ======================================================
 function borderManagerApplyShrink() {
   if (ctx.targetRadius !== null) return;
   const players = getUhcPlayers();
@@ -374,6 +469,9 @@ function borderManagerApplyShrink() {
   });
 }
 
+// ======================================================
+// Border Manager Broad cast Warning (ส่งข้อความเตือนก่อน border เริ่มลดลง)
+// ======================================================
 function borderManagerBroadcastWarning() {
   const players = getUhcPlayers();
   if (!players.length) return;
@@ -383,6 +481,9 @@ function borderManagerBroadcastWarning() {
   });
 }
 
+// ======================================================
+// Border Manager Tick (อัปเดต logic หลักของ border ในแต่ละ tick)
+// ======================================================
 export function borderManagerTick() {
   if (ctx.nextShrinkIndex >= CHECKPOINTS.length) {
     endSequenceTick();
@@ -392,6 +493,9 @@ export function borderManagerTick() {
   if (ctx.uhcTick >= ctx.nextShrinkTick) borderManagerApplyShrink();
 }
 
+// ======================================================
+// Border Manager Apply Damage (คำนวณและทำดาเมจผู้เล่นที่ออกนอก border)
+// ======================================================
 function borderManagerApplyDamage(player) {
   if (!player?.isValid) return;
   const loc = player.location;
@@ -406,6 +510,9 @@ function borderManagerApplyDamage(player) {
   player.applyDamage(damage, configDamage);
 }
 
+// ======================================================
+// Particle Renderer Get Molang (เตรียม Molang variable สำหรับ particle ของ border)
+// ======================================================
 function particleRendererGetMolang(width = 8) {
   if (!ctx.borderMolang) ctx.borderMolang = new MolangVariableMap();
   ctx.borderMolang.setColorRGBA("variable.color", ctx.currentBorderColor);
@@ -413,6 +520,9 @@ function particleRendererGetMolang(width = 8) {
   return ctx.borderMolang;
 }
 
+// ======================================================
+// Particle Renderer Group By Cell (จัดกลุ่มผู้เล่นตาม cell เพื่อลดจำนวนจุดเรนเดอร์)
+// ======================================================
 function particleRendererGroupByCell(players) {
   groupMaps.clear();
   groupsLen = 0;
@@ -456,12 +566,18 @@ function particleRendererGroupByCell(players) {
   }
 }
 
+// ======================================================
+// Particle Renderer SafeS pawn (spawn particle แบบ ignore error)
+// ======================================================
 function particleRendererSafeSpawn(dim, particleId, location, molang) {
   try {
     dim.spawnParticle(particleId, location, molang);
   } catch {}
 }
 
+// ======================================================
+// Particle Renderer Render Edge (เรนเดอร์เส้นขอบด้านเดียวของ border ตามแกนที่กำหนด)
+// ======================================================
 function particleRendererRenderEdge(dim, fixed, rangeMin, rangeMax, playerCoord, view, step, axis, particleId, molang) {
   if (playerCoord < fixed - view || playerCoord > fixed + view) return;
 
@@ -499,6 +615,9 @@ function particleRendererRenderEdge(dim, fixed, rangeMin, rangeMax, playerCoord,
   }
 }
 
+// ======================================================
+// Particle Renderer Render Borde Axis-Aligned Bounding Box (เรนเดอร์ border แบบสี่เหลี่ยมจากขอบเขตปัจจุบัน)
+// ======================================================
 function particleRendererRenderBorderAABB(dim, step, molang) {
   if (!dim || !groupsLen || !ctx.wbBounds) return;
   const [east, west, north, south] = ctx.wbBounds,
@@ -524,6 +643,9 @@ function particleRendererRenderBorderAABB(dim, step, molang) {
   }
 }
 
+// ======================================================
+// Particle Renderer Render Small (เรนเดอร์ border แบบย่อเมื่อรัศมีเล็กมาก)
+// ======================================================
 function particleRendererRenderSmall(dim) {
   const n = ctx.borderRadius;
   const molang = particleRendererGetMolang(n);
@@ -548,6 +670,9 @@ function particleRendererRenderSmall(dim) {
   } catch {}
 }
 
+// ======================================================
+// Particle Renderer Tick (อัปเดตดาเมจนอก border และ particle ตาย tick)
+// ======================================================
 export function particleRendererTick(players) {
   if (!ctx.isRunning || !ctx.borderReady || !ctx.wbBounds) return;
   for (let i = 0; i < players.length; i++) borderManagerApplyDamage(players[i]);
@@ -570,11 +695,17 @@ export function particleRendererTick(players) {
   particleRendererRenderBorderAABB(dim, 16, particleRendererGetMolang(8));
 }
 
+// ======================================================
+// Sequence Reset (รีเซ็ตสถานะของ end sequence หลัง border สุดท้าย)
+// ======================================================
 export function endSequenceReset() {
   ctx.endSeqState = 0;
   ctx.endSeqStartTick = -1;
 }
 
+// ======================================================
+// End Sequence Tick (การทำงาน sequence ตาม state และเวลา)
+// ======================================================
 function endSequenceTick() {
   if (ctx.endSeqState === END_SEQUENCE_STATE.COMPLETED) return;
   if (ctx.targetRadius !== null) return;
@@ -607,6 +738,9 @@ function endSequenceTick() {
   }
 }
 
+// ======================================================
+// Broad Cast (message/title/subtitle/sound ไปยังผู้เล่นที่ระบุ)
+// ======================================================
 export function broadcast(targetOrPayload, maybePayload) {
   let targets, payload;
 

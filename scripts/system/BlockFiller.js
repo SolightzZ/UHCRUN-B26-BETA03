@@ -2,22 +2,29 @@ import { BlockPermutation, system } from "@minecraft/server";
 import { CHECKPOINTS, ctx } from "./BorderManager";
 
 // CONFIG
+// กำหนดขอบเขตความสูงต่ำสุด/สูงสุดของโลกที่ระบบจะเติมบล็อก
 const WORLD_MIN_Y = -64;
 const WORLD_MAX_Y = 319;
+// จำนวนบล็อกที่ประมวลผลต่อรอบในสถานะปกติและช่วงท้ายเกม
 const BATCH_SIZE_NORMAL = 120;
 const BATCH_SIZE_ENDGAME = 400;
+// ความถี่ของลูปหลักและค่าที่ใช้แปลง tick เป็นวินาที
 const FILL_INTERVAL_TICKS = 1;
 const TICKS_PER_SECOND = 20;
+// เพดานของคิวงานและจำนวนบล็อกที่รอประมวลผลพร้อมกัน
 const TASK_QUEUE_HARD_CAP = 8000;
 const MAX_PENDING_BLOCKS = 80000;
 const MAX_BLOCKS_PER_TASK = 250_000;
 const COMPACT_THRESHOLD = 256;
+// ทิศทางการเติมบล็อกตามแกน Y
 const UPWARD_Y = 1;
 const DOWNWARD_Y = -1;
+// ค่าที่ใช้ควบคุม retry queue เมื่อ chunk ยังไม่พร้อม
 const RETRY_QUEUE_LIMIT = 4000;
 const RETRY_BASE_DELAY_TICKS = 12;
 
 // Constants
+// โหมดการเติมบล็อกหลักของระบบ
 export const MODE = Object.freeze({
   CLEAR: 0,
   ORE: 1,
@@ -36,6 +43,7 @@ export const END_SEQUENCE_STATE = Object.freeze({
 });
 
 // BLOCK SOURCE
+// รายชื่อบล็อกต้นทางที่ใช้สุ่มหรือใช้เป็นค่าเริ่มต้นของแต่ละหมวด
 const BLOCK_CATEGORIES = Object.freeze({
   ore: [
     "minecraft:coal_ore",
@@ -76,19 +84,35 @@ const BLOCK_CATEGORIES = Object.freeze({
   ],
 });
 
+// แผนที่เก็บรายการ permutation แยกตามโหมด
 const CATEGORY_MAP = new Map();
+
+// แคช permutation ที่ resolve แล้ว เพื่อลดการสร้างซ้ำ
 const PERM_CACHE = new Map();
+
+// คิวงานเติมบล็อกหลัก และคิว retry เมื่อ chunk ยังไม่พร้อม
 const TASK_QUEUE = [];
 const RETRY_QUEUE = [];
 
+// เก็บ reference ของ block อากาศ (lazy init)
 let AIR;
+
+// id ของ interval สำหรับคำสั่ง fill
 let fillIntervalId = null;
+
+// index หัวคิว (ใช้กับ queue แบบ manual)
 let queueHead = 0;
+
+// จำนวนบล็อกที่รอประมวลผล
 let pendingBlocks = 0;
+
+// index ล่าสุดที่สุ่ม (กันซ้ำ)
 let lastRandomIndex = -1;
 
+// งาน pattern แบบ layered ที่ยังทำงานอยู่
 const ACTIVE_LAYERED_TASKS = [];
 
+// ตัวชี้วัด runtime สำหรับเอาไปแสดงสถานะงานเติมบล็อก
 const runtimeMetrics = {
   lastProcessedBlocks: 0 | 0,
   activeQueueSize: 0 | 0,
@@ -96,9 +120,13 @@ const runtimeMetrics = {
   pendingBlocks: 0 | 0,
 };
 
-// การจัดการ Block Permutation / Chunk Awareness
-const MAX_CACHE_SIZE = 256;
+// แคชสถานะว่า chunk ตำแหน่งใดโหลดแล้วใน tick ปัจจุบัน
+const chunkLoadedCache = Object.create(null);
 
+// ======================================================
+// InitPermutations (resolve block id เป็น BlockPermutation พร้อมใช้งานแคช)
+// ======================================================
+const MAX_CACHE_SIZE = 256; // การจัดการ Block Permutation / Chunk Awareness
 function resolveBlock(id) {
   if (PERM_CACHE.has(id)) return PERM_CACHE.get(id);
 
@@ -112,6 +140,9 @@ function resolveBlock(id) {
   return perm;
 }
 
+// ======================================================
+// InitPermutations (เตรียม permutation ทั้งหมดที่จำเป็นก่อนเริ่มสร้างงานเติมบล็อก)
+// ======================================================
 function initPermutations() {
   if (AIR) return;
   AIR = resolveBlock("minecraft:air");
@@ -131,10 +162,11 @@ function initPermutations() {
   }
 }
 
-const chunkLoadedCache = Object.create(null);
-
-// Random Block
+// ======================================================
+// FastRandomInt (สุ่มเลขจำนวนเต็มแบบเร็วโดยใช้ pseudo-random generator ภายใน)
+// ======================================================
 let seed = (Math.random() * 0xffffffff) >>> 0;
+// seed สำหรับตัวสุ่มแบบเร็วที่ใช้เลือกบล็อก
 if (seed === 0) seed = 1;
 function fastRandomInt(max) {
   seed |= 0;
@@ -145,6 +177,9 @@ function fastRandomInt(max) {
   return result % max;
 }
 
+// ======================================================
+// Random Block (สุ่มบล็อกจากหมวดที่กำหนด โดยพยายามไม่ให้ซ้ำกับครั้งก่อน)
+// ======================================================
 function randomBlock(mode) {
   const permutations = CATEGORY_MAP.get(mode);
   if (!permutations || permutations.length === 0) return AIR;
@@ -156,6 +191,9 @@ function randomBlock(mode) {
   return permutations[index] ?? AIR;
 }
 
+// ======================================================
+// Create Block Resolver (สร้างฟังก์ชันเลือกบล็อกตามโหมดและตัวเลือกการ fill)
+// ======================================================
 function createBlockResolver(mode, fillOptions = {}) {
   if (fillOptions.blockId) {
     const fixedPermutation = resolveBlock(fillOptions.blockId);
@@ -174,11 +212,18 @@ function createBlockResolver(mode, fillOptions = {}) {
   }
 }
 
-// SINGLE MAIN LOOP
+// ======================================================
+// Reseed Random (เปลี่ยน seed บางส่วนเป็นระยะ เพื่อลดความซ้ำของแพทเทิร์นสุ่ม)
+// ======================================================
 function reseedRandom() {
   seed ^= (Math.random() * 0xffffffff) >>> 0;
 }
 
+// ======================================================
+//
+// Main Tick (เลูปหลักของระบบ เติมคิวหลัก คิว retry และงาน layered ในแต่ละ tick)
+//
+// ======================================================
 function mainTick() {
   for (const k in chunkLoadedCache) delete chunkLoadedCache[k];
 
@@ -214,10 +259,16 @@ function mainTick() {
   }
 }
 
+// ======================================================
+// Get Adaptive Batch Size (เลือก batch size ให้เหมาะกับสถานะเกมปัจจุบัน)
+// ======================================================
 function getAdaptiveBatchSize() {
   return ctx?.nextShrinkIndex >= CHECKPOINTS?.length ? BATCH_SIZE_ENDGAME : BATCH_SIZE_NORMAL;
 }
 
+// ======================================================
+// Process Fill Queue (ประมวลผลงานในคิวหลักตามโควตาของ tick ปัจจุบัน)
+// ======================================================
 function processFillQueue() {
   const isEndgame = ctx?.nextShrinkIndex >= CHECKPOINTS?.length;
   if (!isEndgame && system.currentTick % 2 !== 0) return 0;
@@ -261,7 +312,13 @@ function processFillQueue() {
   return processed;
 }
 
-// Queue Management
+// ======================================================
+//
+//                  Queue Management
+//
+// ======================================================
+// Can Queue Task(ตรวจสอบว่างานใหม่สามารถเข้าคิวได้หรือไม่)
+// ======================================================
 function canQueueTask(blockCount) {
   if (blockCount > MAX_BLOCKS_PER_TASK) return false;
   if (TASK_QUEUE.length - queueHead >= TASK_QUEUE_HARD_CAP) return false;
@@ -269,6 +326,9 @@ function canQueueTask(blockCount) {
   return true;
 }
 
+// ======================================================
+// Queue Task (เพิ่มงานเข้า queue หลักและอัปเดตจำนวนบล็อกที่รอทำ)
+// ======================================================
 function queueTask(task, blockCount) {
   if (typeof task !== "function") return false;
   if (blockCount <= 0 || !Number.isFinite(blockCount)) return false;
@@ -286,11 +346,17 @@ function queueTask(task, blockCount) {
   return true;
 }
 
+// ======================================================
+// Compact Queue (ตัดหัวคิวที่ประมวลผลไปแล้วออก เพื่อลดขนาดอาร์เรย์)
+// ======================================================
 function compactQueue() {
   TASK_QUEUE.splice(0, queueHead);
   queueHead = 0;
 }
 
+// ======================================================
+// Fill Add Task (เพิ่มงานเข้าสู่ระบบ ถ้าคิวหลักเต็มจะถูกส่งไป retry queue)
+// ======================================================
 function fillAddTask(task, blockCount) {
   if (typeof task !== "function") return;
   if (blockCount <= 0 || !Number.isFinite(blockCount)) return;
@@ -300,13 +366,22 @@ function fillAddTask(task, blockCount) {
   }
 }
 
+// ======================================================
+// Normalize Remaining (ทำให้ค่าจำนวนบล็อกคงเหลืออยู่ในรูปจำนวนเต็มที่ปลอดภัย)
+// ======================================================
 function normalizeRemaining(value) {
   if (!Number.isFinite(value)) return 0;
   if (value <= 0) return 0;
   return value | 0;
 }
 
-// Retry Queue + Exponential Backoff
+// ======================================================
+//
+//          Retry Queue + Exponential Backoff
+//
+// ======================================================
+// Push Retry (เพิ่มงานที่ติด chunk/block ชั่วคราวเข้า retry queue)
+// ======================================================
 function pushRetry(task, blockCount) {
   if (typeof task !== "function") return;
   if (blockCount <= 0 || !Number.isFinite(blockCount)) return;
@@ -332,6 +407,9 @@ function pushRetry(task, blockCount) {
   });
 }
 
+// ======================================================
+// Process Retry Queue (ลองย้ายงานจาก retry queue กลับเข้า queue หลักตามจังหวะเวลา)
+// ======================================================
 const MAX_ATTEMPTS = 20;
 function processRetryQueue() {
   if (RETRY_QUEUE.length === 0) return;
@@ -372,7 +450,13 @@ function processRetryQueue() {
   }
 }
 
-// Layered Pattern Central Scheduler
+// ======================================================
+//
+//           Layered Pattern Central Scheduler
+//
+// ======================================================
+// Process Layered Tasks (เดินงาน pattern แบบไล่ทีละชั้นสำหรับผู้เล่นที่ลงทะเบียนไว้)
+// ======================================================
 function processLayeredTasks() {
   for (let i = ACTIVE_LAYERED_TASKS.length - 1; i >= 0; i--) {
     const lt = ACTIVE_LAYERED_TASKS[i];
@@ -399,9 +483,12 @@ function processLayeredTasks() {
   }
 }
 
+// ======================================================
+// Register Layered Task (ลงทะเบียนงาน pattern แบบ layered ให้ผูกกับผู้เล่น)
+// ======================================================
+
 export function registerLayeredTask(player, patternTask) {
   if (!player?.isValid) return;
-
   for (let i = 0; i < ACTIVE_LAYERED_TASKS.length; i++) {
     const t = ACTIVE_LAYERED_TASKS[i];
     if (t.player === player && t.patternTask.name === patternTask.name) {
@@ -424,6 +511,9 @@ export function registerLayeredTask(player, patternTask) {
   });
 }
 
+// ======================================================
+// Calculate Bounds (คำนวณขอบเขตพื้นที่เติมบล็อกให้อยู่ในรูป min/max ที่ใช้งานง่าย)
+// ======================================================
 function calculateBounds(x1, y1, z1, x2, y2, z2) {
   const minX = Math.min(x1, x2);
   const maxX = Math.max(x1, x2);
@@ -435,14 +525,19 @@ function calculateBounds(x1, y1, z1, x2, y2, z2) {
   if (minX < -30000000 || maxX > 30000000 || minZ < -30000000 || maxZ > 30000000) {
     return null;
   }
-
   return { minX, maxX, minY, maxY, minZ, maxZ };
 }
 
+// ======================================================
+// Calculate Block Count (คำนวณจำนวนบล็อกทั้งหมดภายใน bounds ที่กำหนด)
+// ======================================================
 function calculateBlockCount(bounds) {
   return (bounds.maxX - bounds.minX + 1) * (bounds.maxZ - bounds.minZ + 1) * (bounds.maxY - bounds.minY + 1);
 }
 
+// ======================================================
+// Split Bounds (แบ่งพื้นที่ใหญ่เกินไปออกเป็นพื้นที่ย่อยเพื่อไม่ให้เกิน limit ต่อ task)
+// ======================================================
 function splitBounds(bounds, stack, yDirection = UPWARD_Y) {
   const sizeX = bounds.maxX - bounds.minX;
   const sizeY = bounds.maxY - bounds.minY;
@@ -472,6 +567,9 @@ function splitBounds(bounds, stack, yDirection = UPWARD_Y) {
   }
 }
 
+// ======================================================
+// Create Bounds Taskk (สร้าง task สำหรับเติมบล็อกใน bounds เดียวแบบค่อย ๆ ทำตาม limit)
+// ======================================================
 function createBoundsTask(dim, bounds, mode, yDirection = UPWARD_Y, fillOptions = {}) {
   let x = bounds.minX;
   let y = yDirection === DOWNWARD_Y ? bounds.maxY : bounds.minY;
@@ -548,6 +646,9 @@ function createBoundsTask(dim, bounds, mode, yDirection = UPWARD_Y, fillOptions 
   };
 }
 
+// ======================================================
+// Create Fill Task (สร้างชุด task ย่อยจากพื้นที่เติมบล็อกทั้งหมด)
+// ======================================================
 function createFillTask(dim, x1, y1, z1, x2, y2, z2, mode, yDirection = UPWARD_Y, fillOptions = {}) {
   initPermutations();
   const initialBounds = calculateBounds(x1, y1, z1, x2, y2, z2);
@@ -569,11 +670,20 @@ function createFillTask(dim, x1, y1, z1, x2, y2, z2, mode, yDirection = UPWARD_Y
   return segments;
 }
 
-// Pattern
+// ======================================================
+//
+//                     Pattern
+//
+// ======================================================
+// Create Pattern Segment (สร้างข้อมูลชิ้นส่วน pattern หนึ่งชิ้นแบบ immutable)
+// ======================================================
 function createPatternSegment(name, x1, z1, x2, z2) {
   return Object.freeze({ name, x1, z1, x2, z2 });
 }
 
+// ======================================================
+// Rotate Pattern Segment (หมุน segment 90 องศารอบจุดศูนย์กลาง)
+// ======================================================
 function rotatePatternSegment(segment) {
   const x1 = segment.z1;
   const z1 = -segment.x1;
@@ -582,6 +692,9 @@ function rotatePatternSegment(segment) {
   return createPatternSegment(segment.name, Math.min(x1, x2), Math.min(z1, z2), Math.max(x1, x2), Math.max(z1, z2));
 }
 
+// ======================================================
+// Build Pattern Rotation Cache (สร้างแคช pattern ที่หมุนไว้ครบ 4 ทิศ)
+// ======================================================
 function buildPatternRotationCache(segments) {
   const rotation1 = segments.map(rotatePatternSegment);
   const rotation2 = rotation1.map(rotatePatternSegment);
@@ -589,6 +702,9 @@ function buildPatternRotationCache(segments) {
   return [segments, rotation1, rotation2, rotation3];
 }
 
+// ======================================================
+// Create Pattern Task (สร้าง pattern task พร้อมตัวเลือกทิศทาง ความหน่วง และการหมุน)
+// ======================================================
 function createPatternTask(name, mode, segments, options = {}) {
   return Object.freeze({
     name,
@@ -603,7 +719,13 @@ function createPatternTask(name, mode, segments, options = {}) {
   });
 }
 
-// Pattern Segment
+// ======================================================
+//
+//                  Pattern Segment
+//
+// ======================================================
+// Enqueue Pattern Segment (แปลง segment ให้เป็นงานเติมบล็อกจริงแล้วส่งเข้าคิว)
+// ======================================================
 function enqueuePatternSegment(dim, segment, startY, endY, mode, yDirection = UPWARD_Y, fillOptions = {}) {
   const segments = createFillTask(dim, segment.x1, startY, segment.z1, segment.x2, endY, segment.z2, mode, yDirection, fillOptions);
   if (!segments || segments.length === 0) return;
@@ -614,6 +736,9 @@ function enqueuePatternSegment(dim, segment, startY, endY, mode, yDirection = UP
   }
 }
 
+// ======================================================
+// Enqueue Pattern Segments (ส่งทุก segment ของ pattern เข้า queue ที่ระดับ Y ที่กำหนด)
+// ======================================================
 function enqueuePatternSegments(dim, y, patternTask) {
   const endY = patternTask.fillBottomY ?? y;
   for (let i = 0; i < patternTask.segments.length; i++) {
@@ -621,6 +746,9 @@ function enqueuePatternSegments(dim, y, patternTask) {
   }
 }
 
+// ======================================================
+// Enqueue Rotated Pattern Segments (ส่ง segment ของ pattern เวอร์ชันที่หมุนแล้วเข้า queue)
+// ======================================================
 function enqueueRotatedPatternSegments(dim, y, patternTask, rotationIndex) {
   const rotation = patternTask.rotationCache?.[rotationIndex];
   if (!rotation) return;
@@ -629,6 +757,9 @@ function enqueueRotatedPatternSegments(dim, y, patternTask, rotationIndex) {
   }
 }
 
+// ======================================================
+// Start Fill Loop If Needed (เริ่มลูปเติมบล็อก หากระบบยังไม่ได้ทำงานอยู่)
+// ======================================================
 function startFillLoopIfNeeded() {
   if (fillIntervalId !== null) return;
 
@@ -638,10 +769,13 @@ function startFillLoopIfNeeded() {
   }, FILL_INTERVAL_TICKS);
 }
 
-//===============================
-// STATE API
-//===============================
-
+// ======================================================
+//
+//               STATE API
+//
+// ======================================================
+// Fill Reset (รีเซ็ตสถานะและคิวทั้งหมดของระบบเติมบล็อก)
+// ======================================================
 export function fillReset() {
   if (fillIntervalId !== null) {
     system.clearRun(fillIntervalId);
@@ -659,10 +793,16 @@ export function fillReset() {
   pattern2Queued = false;
 }
 
+// ======================================================
+// FillIs Idle (ตรวจสอบว่าระบบเติมบล็อกหยุดอยู่หรือไม่)
+// ======================================================
 function fillIsIdle() {
   return fillIntervalId === null;
 }
 
+// ======================================================
+// Fill Estimate Remaining Seconds (ประเมินเวลาที่เหลือโดยอิงจาก pending blocks และ batch size ปัจจุบัน)
+// ======================================================
 function fillEstimateRemainingSeconds() {
   if (pendingBlocks <= 0 || fillIsIdle()) return 0;
   const batchSize = getAdaptiveBatchSize();
@@ -672,10 +812,16 @@ function fillEstimateRemainingSeconds() {
   return Math.max(1, Math.ceil(pendingBlocks / (batchSize * fillsPerSecond)));
 }
 
+// ======================================================
+// Fill Has Pending Work (ระบบยังมีงานเติมบล็อกค้างอยู่หรือไม่)
+// ======================================================
 export function fillHasPendingWork() {
   return !fillIsIdle() && pendingBlocks > 0;
 }
 
+// ======================================================
+// Should Advance End Sequence (ตัดสินว่า end sequence ควรขยับไป state ถัดไปหรือยัง)
+// ======================================================
 export function shouldAdvanceEndSequence(uhcTick, state, startTick, hasPendingWork) {
   if (startTick === -1) return false;
   const elapsed = uhcTick - startTick;
@@ -693,6 +839,9 @@ export function shouldAdvanceEndSequence(uhcTick, state, startTick, hasPendingWo
   }
 }
 
+// ======================================================
+// Get End Sequence Step (คืนค่าข้อมูลของขั้นตอน end sequence ตาม state ปัจจุบัน)
+// ======================================================
 export function getEndSequenceStep(state) {
   const END_SEQUENCE_STEPS = [
     {
@@ -727,6 +876,9 @@ export function getEndSequenceStep(state) {
   return END_SEQUENCE_STEPS[state] ?? null;
 }
 
+// ======================================================
+// Get End Sequence Labe (สร้างข้อความสถานะสำหรับแสดงความคืบหน้าของ end sequence)
+// ======================================================
 export function getEndSequenceLabel(uhcTick, state, startTick, hasPendingWork) {
   const elapsed = startTick === -1 ? 0 : uhcTick - startTick;
   const remTime = Math.max(0, 100 - elapsed);
@@ -753,7 +905,13 @@ export function getEndSequenceLabel(uhcTick, state, startTick, hasPendingWork) {
   }
 }
 
-// PATTERN TASKS
+// ======================================================
+//
+//                  PATTERN TASKS
+//
+// ======================================================
+
+// pattern วงนอกสำหรับล้างพื้นที่ชั้นนอก
 const PATTERN_1_TASK = createPatternTask(
   "pattern_1",
   MODE.CLEAR,
@@ -767,6 +925,7 @@ const PATTERN_1_TASK = createPatternTask(
   { useRotation: false, delay: 1, startTopY: WORLD_MAX_Y },
 );
 
+// pattern วงในสำหรับล้างพื้นที่ชั้นใน
 const PATTERN_2_TASK = createPatternTask(
   "pattern_2",
   MODE.CLEAR,
@@ -780,6 +939,7 @@ const PATTERN_2_TASK = createPatternTask(
   { useRotation: false, delay: 1, startTopY: WORLD_MAX_Y },
 );
 
+// pattern กำแพง nether สำหรับช่วงปิดเกม
 const PATTERN_3_TASK = createPatternTask("pattern_3", MODE.NETHER, [
   createPatternSegment("top", -17, 17, 17, 17),
   createPatternSegment("right", 17, -17, 17, 17),
@@ -787,7 +947,13 @@ const PATTERN_3_TASK = createPatternTask("pattern_3", MODE.NETHER, [
   createPatternSegment("left", -17, -17, -17, 17),
 ]);
 
-// Export API signature
+// ======================================================
+//
+//           ---  Export API signature  ---
+//
+// ======================================================
+// Run End Pattern 3 (รัน pattern กำแพง nether จากตำแหน่งผู้เล่นลงไปจนสุดโลก)
+// ======================================================
 export function runEndPattern3(player) {
   if (!player?.isValid) return;
   const dim = player.dimension;
@@ -800,9 +966,13 @@ export function runEndPattern3(player) {
   }
 }
 
+// กันการสั่ง pattern ซ้ำหลายครั้ง
 let pattern1Queued = false;
 let pattern2Queued = false;
 
+// ======================================================
+// Run End Pattern 1 (รัน pattern ล้างวงนอกจากด้านบนลงล่าง)
+// ======================================================
 export function runEndPattern1(player) {
   if (pattern1Queued) return;
   if (!player?.isValid) return;
@@ -816,6 +986,9 @@ export function runEndPattern1(player) {
   }
 }
 
+// ======================================================
+// Run End Pattern 2 (รัน pattern ล้างวงในจากด้านล่างขึ้นบน)
+// ======================================================
 export function runEndPattern2(player) {
   if (pattern2Queued) return;
   if (!player?.isValid) return;

@@ -23,14 +23,23 @@ import {
 // @ts-ignore
 import { endGameUhc, markAliveTeamDirty, resetGameUhc, startGameUhc } from "./UhcMatchManager.js";
 
+// ขอบเขตโลกเริ่มต้น (checkpoint แรก)
 const GLOBAL_BORDER_LIMIT = CHECKPOINTS[0];
+
+// รัศมีที่ห้ามวางบล็อกใกล้ขอบเขต
 const PLACE_BLOCK_LOCK_RADIUS = 16;
+
+// คำสั่งสำหรับบังคับใช้ fill
 const FORCE_FILL_COMMAND = "!fill";
+
+// คิวสำหรับคำสั่งย่อขอบเขตขั้นสุดท้าย
 const forceFinalShrinkQueue = [];
+
+// สถานะว่ามีการ schedule งานย่อขอบเขตแล้วหรือยัง
 let forceFinalShrinkScheduled = false;
 
 // ======================================================
-// isUhcPlayer (ตรวจสอบว่าโปรแกรมเล่น UHC เปิดใช้งานอยู่หรือไม่))
+// isUhcPlayer (ตรวจสอบว่าโปรแกรมเล่น UHC เปิดใช้งานอยู่หรือไม่)
 // ======================================================
 function isUhcPlayer(player) {
   if (!ctx.isRunning) return false;
