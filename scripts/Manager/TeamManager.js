@@ -3,6 +3,9 @@ import { ActionFormData } from "@minecraft/server-ui";
 // @ts-ignore
 import { dynamicToast } from "../plugin/Util.js";
 
+//@ts-ignore
+import { TEAMS, CONFIG } from "./UtilTeamManaer.js";
+
 // ======================================================
 // Player Cache (cache ผู้เล่น runtime)
 // ======================================================
@@ -21,36 +24,6 @@ let aliveTeamDirtyHandler = () => {};
 export function registerAliveTeamDirtyHandler(handler) {
   aliveTeamDirtyHandler = typeof handler === "function" ? handler : () => {};
 }
-
-// ======================================================
-// TEAMS (config ทีมทั้งหมด)
-// ======================================================
-const TEAMS = Object.freeze([
-  { id: "team1", name: "Red", color: "§c", icon: "textures/items/dye_powder_red" },
-  { id: "team2", name: "Blue", color: "§9", icon: "textures/items/dye_powder_blue_new" },
-  { id: "team3", name: "Yellow", color: "§e", icon: "textures/items/dye_powder_yellow" },
-  { id: "team4", name: "Green", color: "§a", icon: "textures/items/dye_powder_lime" },
-  { id: "team5", name: "Purple", color: "§5", icon: "textures/items/dye_powder_purple" },
-  { id: "team6", name: "Aqua", color: "§b", icon: "textures/items/dye_powder_light_blue" },
-  { id: "team7", name: "Orange", color: "§6", icon: "textures/items/dye_powder_orange" },
-  { id: "team8", name: "Gray", color: "§7", icon: "textures/items/dye_powder_silver" },
-  { id: "team9", name: "Pink", color: "§d", icon: "textures/items/dye_powder_pink" },
-]);
-
-// ======================================================
-// CONFIG (ค่าคงที่ระบบ UHC)
-// ======================================================
-export const CONFIG = Object.freeze({
-  adminTag: "admin",
-  uhcTag: "uhc",
-  objectiveName: "uhcBoard",
-  displayName: "UHC",
-  title: "§g§r",
-
-  // DynamicProperty:
-  // { playerId → teamId }
-  key: "team",
-});
 
 // ======================================================
 // TEAM_LOOKUP (map id → team info)
@@ -279,11 +252,11 @@ function removePlayerFromAliveRuntimeState(id, teamId) {
 function syncTag(player, oldTeamId, newTeamId) {
   if (oldTeamId === newTeamId) return;
 
-  if (player.hasTag(oldTeamId)) {
+  if (typeof oldTeamId === "string" && oldTeamId.length > 0 && player.hasTag(oldTeamId)) {
     player.removeTag(oldTeamId);
   }
 
-  if (!newTeamId) return;
+  if (typeof newTeamId !== "string" || newTeamId.length === 0 || !TEAM_LOOKUP.has(newTeamId)) return;
 
   if (!player.hasTag(newTeamId)) {
     player.addTag(newTeamId);
@@ -411,7 +384,7 @@ function sendDeathMessage(player, killerDisplay) {
       `§eSTATS\n` +
       `§7 » Kills: §c${stats.kills}\n` +
       `§7 » Deaths: §c${stats.deaths}\n\n` +
-      `§9 » Sleeplite SMP\n\n` +
+      `§9 » Sleeplite SMP: discord.gg/gtqfbmvTJK\n\n` +
       `§7==========================\n\n`,
   );
 }
@@ -424,6 +397,7 @@ let deathBatchRunning = false;
 
 function processDeathBatch() {
   let count = 0;
+  let consoleBody = "";
   let dynamicBatch = 5;
   if (deathQueue.length > 20) {
     dynamicBatch = 10;
@@ -1480,14 +1454,24 @@ function playerLists(player) {
   refreshPlayerCaches();
   const form = new ActionFormData();
   form.title("Player List");
-  const players = getCachedPlayers();
+  const players = getCachedPlayers()
+    .filter((p) => p?.isValid)
+    .slice()
+    .sort((a, b) => {
+      const teamA = getPlayerTeam(a);
+      const teamB = getPlayerTeam(b);
+      const indexA = typeof teamA === "string" ? (TEAM_INDEX_MAP.get(teamA) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+      const indexB = typeof teamB === "string" ? (TEAM_INDEX_MAP.get(teamB) ?? Number.MAX_SAFE_INTEGER) : Number.MAX_SAFE_INTEGER;
+      if (indexA !== indexB) return indexA - indexB;
+      return a.name.localeCompare(b.name);
+    });
   const pLen = players.length;
   let count = 0;
+  let consoleBody = "";
   for (let i = 0; i < pLen; i++) {
     const p = players[i];
     if (!p) continue;
-    if (!p.isValid) continue;
-    const teamId = playerTeamCache.get(p.id);
+    const teamId = getPlayerTeam(p);
     let label = p.name + " | No Team";
     let icon = "textures/ui/world_glyph_desaturated";
     if (teamId) {
@@ -1497,18 +1481,27 @@ function playerLists(player) {
         icon = team.icon;
       }
     }
+    consoleBody += `${count + 1}. ${p.name} | ${teamId ?? "No Team"}\n`;
     form.button(label, icon);
     count++;
   }
 
   if (count === 0) {
     form.body("No players online.");
+    consoleBody = "No players online.";
   }
-  const backIndex = count;
+  const consoleIndex = count;
+  const backIndex = count + 1;
+  form.button("Console", "textures/ui/icons/icon_fall");
   form.button("Back");
   form.show(player).then((res) => {
     if (!res) return;
     if (res.canceled) return;
+    if (res.selection === consoleIndex) {
+      console.warn("[Player List]\n" + consoleBody.trimEnd());
+      AdminMenu(player);
+      return;
+    }
     if (res.selection === backIndex) {
       AdminMenu(player);
       return;
@@ -1845,7 +1838,7 @@ export function tpa(player) {
   if (!player.isValid) return;
   if (!isGameRunning) return;
   if (player.hasTag(CONFIG.uhcTag)) {
-    player.sendMessage("§cYou cannot use TPA while alive in UHC!");
+    player.sendMessage("§c[x] คุณไม่สามารถใช้ TPA ได้ในขณะที่ยังเล่น UHCRUN!");
     return;
   }
 
@@ -1918,14 +1911,14 @@ function editPlayerMenu(admin, target) {
 
     if (res.selection === 0) {
       leaveTeam(target);
-      admin.sendMessage(`[System] §f${target.name} §chas been removed from their team.`);
+      admin.sendMessage(`[x] §f${target.name} §chas been removed from their team.`);
       return Managements(admin);
     }
 
     if (res.selection <= TEAMS.length) {
       const selectedTeam = TEAMS[res.selection - 1];
       joinTeam(target, selectedTeam.id);
-      admin.sendMessage(`[System] §aMoved §f${target.name} §ato ${selectedTeam.color}${selectedTeam.name}§a.`);
+      admin.sendMessage(`[/] §aMoved §f${target.name} §ato ${selectedTeam.color}${selectedTeam.name}§a.`);
       return Managements(admin);
     }
 
@@ -2195,7 +2188,8 @@ function teleportToSpawn(player) {
 // ======================================================
 export function openMainMenu(player) {
   const form = new ActionFormData();
-  form.title(CONFIG.title + "§6UHCRun");
+  form.title(CONFIG.title);
+  form.body("§6UHCRun");
   form.button("Spawn", "textures/ui/icons/icon_summer");
   form.button("Team", "textures/ui/icons/icon_multiplayer");
 
@@ -2256,7 +2250,7 @@ export function showVictoryMessage(winnerTeamId, uhcTick = 0) {
       `§eSTATS\n` +
       `§7 » Total Kills: §c${teamStat.kills}\n` +
       `§7 » Match Time: §e${minutes}m ${seconds}s\n\n` +
-      `§9 » Sleeplite SMP\n\n` +
+      `§9 » Sleeplite SMP: discord.gg/gtqfbmvTJK\n\n` +
       `§7=======================================\n\n`,
   );
 }
@@ -2316,47 +2310,55 @@ export function refreshPlayerCaches() {
 }
 
 // ======================================================
-//  Clear All player Nematags (รีเซ็ตระบบ ชื่อแท็ก)
+// clearAllPlayerNametags (ลบ nametag ทุกคนแบบ batch)
 // ======================================================
 export function clearAllPlayerNametags() {
-  const players = world.getPlayers();
   let index = 0;
 
   const task = system.runInterval(() => {
-    for (let i = 0; i < 3 && index < players.length; i++) {
-      const p = players[index++];
+    const players = world.getPlayers();
+    const total = players.length;
 
-      if (!p || !p.isValid) continue;
+    if (index >= total) {
+      system.clearRun(task);
+      console.warn("Clear All Player Nametags");
+      return;
+    }
+
+    // process batch (3 per tick)
+    for (let i = 0; i < 3 && index < total; i++, index++) {
+      const p = players[index];
+      if (!p?.isValid) continue;
+
       if (p.nameTag === p.name) continue;
 
       p.nameTag = p.name;
-    }
-
-    if (index >= players.length) {
-      system.clearRun(task);
-      console.warn("clearAllPlayerNametags");
     }
   }, 1);
 }
 
 // ======================================================
-//  Reset Announcer (รีเซ็ตระบบ ประกาศ Kill Streak)
+// resetAnnouncer (รีเซ็ตระบบประกาศ + เคลียร์ nametag)
 // ======================================================
 export function resetAnnouncer() {
   multiKill.clear();
   killStreak.clear();
   firstBloodDone = false;
 
-  const players = world.getPlayers(),
-    pLen = players.length;
+  const players = world.getPlayers();
+  const total = players.length;
 
-  for (let i = 0; i < pLen; i++) {
+  for (let i = 0; i < total; i++) {
     const p = players[i];
     if (!p?.isValid) continue;
 
-    if (p.nameTag.includes("\n§f")) {
-      p.nameTag = p.name;
-    }
+    const tag = p.nameTag;
+    if (!tag) continue;
+
+    // reset nametag if modified
+    if (tag === p.name) continue;
+    if (!tag.includes("\n")) continue;
+    p.nameTag = p.name;
   }
 
   console.warn("[UHC] Announcer System Reset.");
@@ -2382,7 +2384,6 @@ export function clearAllTaguhcAndDynamicProperty(executor) {
 
     const teamId = playerTeamCache.get(player.id);
     if (teamId) player.removeTag(teamId);
-
     if (player.hasTag("uhc")) player.removeTag("uhc");
 
     player.setDynamicProperty(CONFIG.key, undefined);
@@ -2677,7 +2678,17 @@ world.beforeEvents.chatSend.subscribe((ev) => {
 // ======================================================
 export function getPlayerTeam(player) {
   if (!player?.isValid) return null;
-  return playerTeamCache.get(player.id) ?? player.getDynamicProperty(CONFIG.key) ?? null;
+  const cachedTeamId = playerTeamCache.get(player.id);
+  if (typeof cachedTeamId === "string" && TEAM_LOOKUP.has(cachedTeamId)) {
+    return cachedTeamId;
+  }
+
+  const dynamicTeamId = player.getDynamicProperty(CONFIG.key);
+  if (typeof dynamicTeamId === "string" && TEAM_LOOKUP.has(dynamicTeamId)) {
+    return dynamicTeamId;
+  }
+
+  return null;
 }
 
 export function getTeams() {

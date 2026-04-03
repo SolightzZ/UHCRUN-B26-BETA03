@@ -1,5 +1,11 @@
-import { BlockPermutation, system } from "@minecraft/server";
+import { BlockPermutation, system, world } from "@minecraft/server";
+
+// @ts-ignore
 import { CHECKPOINTS, ctx } from "./BorderManager";
+
+// @ts-ignore
+import { MODE, END_SEQUENCE_STATE, BLOCK_CATEGORIES } from "./BlockFillerUtil";
+export { END_SEQUENCE_STATE } from "./BlockFillerUtil";
 
 // CONFIG
 // กำหนดขอบเขตความสูงต่ำสุด/สูงสุดของโลกที่ระบบจะเติมบล็อก
@@ -22,67 +28,6 @@ const DOWNWARD_Y = -1;
 // ค่าที่ใช้ควบคุม retry queue เมื่อ chunk ยังไม่พร้อม
 const RETRY_QUEUE_LIMIT = 4000;
 const RETRY_BASE_DELAY_TICKS = 12;
-
-// Constants
-// โหมดการเติมบล็อกหลักของระบบ
-export const MODE = Object.freeze({
-  CLEAR: 0,
-  ORE: 1,
-  NETHER: 2,
-  CONCRETE: 3,
-  RANDOM: 4,
-});
-
-export const END_SEQUENCE_STATE = Object.freeze({
-  INITIAL_WAIT: 0,
-  PATTERN3: 1,
-  PATTERN1: 2,
-  COOLDOWN: 3,
-  PATTERN2: 4,
-  COMPLETED: 5,
-});
-
-// BLOCK SOURCE
-// รายชื่อบล็อกต้นทางที่ใช้สุ่มหรือใช้เป็นค่าเริ่มต้นของแต่ละหมวด
-const BLOCK_CATEGORIES = Object.freeze({
-  ore: [
-    "minecraft:coal_ore",
-    "minecraft:iron_ore",
-    "minecraft:copper_ore",
-    "minecraft:gold_ore",
-    "minecraft:redstone_ore",
-    "minecraft:lapis_ore",
-    "minecraft:diamond_ore",
-    "minecraft:emerald_ore",
-  ],
-  nether: ["minecraft:ancient_debris", "minecraft:magma", "minecraft:blackstone"],
-  concrete: [
-    "minecraft:white_concrete",
-    "minecraft:orange_concrete",
-    "minecraft:magenta_concrete",
-    "minecraft:light_blue_concrete",
-    "minecraft:yellow_concrete",
-    "minecraft:lime_concrete",
-    "minecraft:pink_concrete",
-    "minecraft:gray_concrete",
-    "minecraft:light_gray_concrete",
-    "minecraft:cyan_concrete",
-    "minecraft:purple_concrete",
-    "minecraft:blue_concrete",
-    "minecraft:brown_concrete",
-    "minecraft:green_concrete",
-    "minecraft:red_concrete",
-    "minecraft:black_concrete",
-  ],
-  random: [
-    "minecraft:obsidian",
-    "minecraft:crying_obsidian",
-    "minecraft:amethyst_block",
-    "minecraft:calcite",
-    "minecraft:deepslate",
-    "minecraft:basalt",
-  ],
-});
 
 // แผนที่เก็บรายการ permutation แยกตามโหมด
 const CATEGORY_MAP = new Map();
@@ -112,6 +57,9 @@ let lastRandomIndex = -1;
 // งาน pattern แบบ layered ที่ยังทำงานอยู่
 const ACTIVE_LAYERED_TASKS = [];
 
+// แคชสถานะว่า chunk ตำแหน่งใดโหลดแล้วใน tick ปัจจุบัน
+const chunkLoadedCache = Object.create(null);
+
 // ตัวชี้วัด runtime สำหรับเอาไปแสดงสถานะงานเติมบล็อก
 const runtimeMetrics = {
   lastProcessedBlocks: 0 | 0,
@@ -119,9 +67,6 @@ const runtimeMetrics = {
   retryQueueSize: 0 | 0,
   pendingBlocks: 0 | 0,
 };
-
-// แคชสถานะว่า chunk ตำแหน่งใดโหลดแล้วใน tick ปัจจุบัน
-const chunkLoadedCache = Object.create(null);
 
 // ======================================================
 // InitPermutations (resolve block id เป็น BlockPermutation พร้อมใช้งานแคช)

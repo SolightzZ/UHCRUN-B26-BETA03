@@ -128,11 +128,18 @@ export function GameContext() {
   };
 }
 
-// รีเซ็ต context เป้าหมายกลับเป็นค่าเริ่มต้นทั้งหมด
+// ======================================================
+// Reset Context (รีเซ็ต context เป้าหมายกลับเป็นค่าเริ่มต้นทั้งหมด)
+// ======================================================
 export function resetContext(target) {
+  if (!target) return;
+
   const fresh = GameContext();
   const keys = Object.keys(fresh);
-  for (let i = 0; i < keys.length; i++) target[keys[i]] = fresh[keys[i]];
+
+  for (let i = 0; i < keys.length; i++) {
+    target[keys[i]] = fresh[keys[i]];
+  }
 }
 
 // context กลางที่ใช้ร่วมกันภายในโมดูลนี้
