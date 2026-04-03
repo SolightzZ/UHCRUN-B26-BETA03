@@ -90,6 +90,7 @@ function resolveBlock(id) {
 // ======================================================
 function initPermutations() {
   if (AIR) return;
+
   AIR = resolveBlock("minecraft:air");
   const categorySources = [
     [MODE.ORE, BLOCK_CATEGORIES.ore],
@@ -97,12 +98,15 @@ function initPermutations() {
     [MODE.CONCRETE, BLOCK_CATEGORIES.concrete],
     [MODE.RANDOM, BLOCK_CATEGORIES.random],
   ];
+
   for (let i = 0; i < categorySources.length; i++) {
     const [mode, blockIds] = categorySources[i];
     const permutations = new Array(blockIds.length);
+
     for (let j = 0; j < blockIds.length; j++) {
       permutations[j] = resolveBlock(blockIds[j]);
     }
+
     CATEGORY_MAP.set(mode, permutations);
   }
 }
@@ -494,15 +498,18 @@ function splitBounds(bounds, stack, yDirection = UPWARD_Y) {
     stack.push({ minX: mid + 1, maxX: bounds.maxX, minY: bounds.minY, maxY: bounds.maxY, minZ: bounds.minZ, maxZ: bounds.maxZ });
     return;
   }
+
   if (sizeZ >= sizeY) {
     const mid = (bounds.minZ + bounds.maxZ) >> 1;
     stack.push({ minX: bounds.minX, maxX: bounds.maxX, minY: bounds.minY, maxY: bounds.maxY, minZ: bounds.minZ, maxZ: mid });
     stack.push({ minX: bounds.minX, maxX: bounds.maxX, minY: bounds.minY, maxY: bounds.maxY, minZ: mid + 1, maxZ: bounds.maxZ });
     return;
   }
+
   const mid = (bounds.minY + bounds.maxY) >> 1;
   const lower = { minX: bounds.minX, maxX: bounds.maxX, minY: bounds.minY, maxY: mid, minZ: bounds.minZ, maxZ: bounds.maxZ };
   const upper = { minX: bounds.minX, maxX: bounds.maxX, minY: mid + 1, maxY: bounds.maxY, minZ: bounds.minZ, maxZ: bounds.maxZ };
+
   if (yDirection === DOWNWARD_Y) {
     stack.push(lower);
     stack.push(upper);
@@ -519,8 +526,11 @@ function createBoundsTask(dim, bounds, mode, yDirection = UPWARD_Y, fillOptions 
   let x = bounds.minX;
   let y = yDirection === DOWNWARD_Y ? bounds.maxY : bounds.minY;
   let z = bounds.minZ;
+
   const totalBlockCount = calculateBlockCount(bounds);
+
   let remaining = totalBlockCount;
+
   const resolvePermutation = createBlockResolver(mode, fillOptions);
   const isStatic = !fillOptions.randomize && !fillOptions.blockId && mode !== MODE.NETHER;
   const staticPerm = isStatic ? resolvePermutation() : null;
@@ -528,8 +538,10 @@ function createBoundsTask(dim, bounds, mode, yDirection = UPWARD_Y, fillOptions 
 
   const minX = bounds.minX,
     maxX = bounds.maxX;
+
   const minY = bounds.minY,
     maxY = bounds.maxY;
+
   const minZ = bounds.minZ,
     maxZ = bounds.maxZ;
 
@@ -716,7 +728,7 @@ function startFillLoopIfNeeded() {
 
 // ======================================================
 //
-//               STATE API
+//                     STATE API
 //
 // ======================================================
 // Fill Reset (รีเซ็ตสถานะและคิวทั้งหมดของระบบเติมบล็อก)

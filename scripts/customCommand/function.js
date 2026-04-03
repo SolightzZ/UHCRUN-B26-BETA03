@@ -1,6 +1,7 @@
 import { world, system, GameMode, InputPermissionCategory, Difficulty, ItemStack, CommandPermissionLevel } from "@minecraft/server";
 import { startGameUhc, endGameUhc, resetGameUhc } from "../system/border";
 import { tpa, openMainMenu } from "../Manager/TeamManager";
+import { spawnLeaderboardNPC, updateLeaderboard } from "../Manager/Leaderboard.js";
 
 //=================================
 // CONFIG
@@ -157,6 +158,9 @@ function uhcSetup() {
   cmd("setworldspawn 596 125 622");
 
   batch({ step: setup, budget: 1 });
+
+  spawnLeaderboardNPC();
+  updateLeaderboard();
 }
 
 function uhcReset() {
@@ -177,6 +181,9 @@ function uhcReset() {
   cmd("setworldspawn 596 125 622");
 
   batch({ step: reset, budget: 1 });
+
+  spawnLeaderboardNPC();
+  updateLeaderboard();
 }
 
 function uhcStart() {

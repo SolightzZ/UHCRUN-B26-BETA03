@@ -13,26 +13,43 @@ import {
   refreshPlayerCaches,
 } from "../Manager/TeamManager.js";
 
-const MAX_PLAYERS = 10;
-const MAX_TEAMS = 10;
-const RENDER_INTERVAL_TICKS = 100;
+const MAX_PLAYERS = 10; // จำนวนผู้เล่นสูงสุดที่แสดงในตารางคะแนน
+const MAX_TEAMS = 10; // จำนวนทีมสูงสุดที่แสดงในตารางคะแนน
 
+// รูปแบบการแสดงผล
 const UI = Object.freeze({
   HEAD: "§g§l--- [ UHCRUN LEADERBOARD ] ---\n\n",
   FOOT: "\n§g-----------------------------------",
   RANKS: ["§6", "§7", "§c", "§f"],
 });
 
+// ตำแหน่งของ NPC แต่ละตัว (ไม่ใช้ tag แล้ว)
 const NPCS = Object.freeze([
-  { tag: "lb_players", x: 596.5, y: 127, z: 601.5 },
-  { tag: "lb_teams", x: 593.5, y: 127, z: 600.5 },
-  { tag: "lb_deaths", x: 599.5, y: 127, z: 600.5 },
+  { x: 596.5, y: 127, z: 601.5 }, // index 0 = Top Team Kill
+  { x: 593.5, y: 127, z: 600.5 }, // index 1 = Top Player Kill
+  { x: 599.5, y: 127, z: 600.5 }, // index 2 = Top Player Deaths
 ]);
 
-let lastRenderTick = 0;
-const leaderboardInteractQueue = [];
-let leaderboardInteractScheduled = false;
+// การแคชเอนทิตีและการจดจำค่า
+const NPC_QUERY_OPTIONS = Object.freeze({
+  type: "minecraft:npc",
+  location: { x: 596, y: 127, z: 600 },
+  maxDistance: 10,
+});
 
+let lastStatsHash = "";
+let lastTeamHash = "";
+let cachedPlayerText = "";
+let cachedTeamText = "";
+let cachedDeathsText = "";
+
+// ======================================================
+//
+//              UTILITY FUNCTIONS
+//
+// ======================================================
+// getRankColor (คืนค่าสีตามอันดับที่กำหนด)
+// ======================================================
 function getRankColor(index) {
   if (index < UI.RANKS.length) {
     return UI.RANKS[index];
@@ -41,475 +58,691 @@ function getRankColor(index) {
   }
 }
 
-// ตรวจสอบว่าเอนทิตีนั้นเป็น NPC ในลีดเดอร์บอร์ดหรือไม่ และส่งคืนแท็กของเอนทิตีนั้น
-function getLeaderboardNpcTag(entity) {
-  if (!entity || !entity.isValid) return "";
-
-  if (entity.hasTag("lb_players")) return "lb_players";
-  if (entity.hasTag("lb_teams")) return "lb_teams";
-  if (entity.hasTag("lb_deaths")) return "lb_deaths";
-
-  return "";
+// ======================================================
+// generateStatsHash (สร้างรหัสตรวจสอบการเปลี่ยนแปลงของข้อมูลสถิติ)
+// ======================================================
+function generateStatsHash(statsMap) {
+  const entries = Array.from(statsMap.entries());
+  let hashString = "";
+  for (let i = 0; i < entries.length; i++) {
+    const [name, stats] = entries[i];
+    hashString += `${name}${stats.kills}${stats.deaths}${stats.teamLabel || ""}`;
+  }
+  return hashString;
 }
 
+// ======================================================
+//
+//        DATA PROCESSING - การประมวลผลข้อมูล
+//
+// ======================================================
+// getStats (รวบรวมข้อมูลสถิติผู้เล่นจาก Scoreboard หรือ Cache)
+// ======================================================
 function getStats() {
-  const objectiveStats = getObjectivePlayerStats();
-  if (objectiveStats.size) return objectiveStats;
+  console.warn("[DEBUG] getStats() called");
 
-  const raw = getPlayerStats();
-  const map = new Map();
-  if (!raw || !raw.size) return map;
+  const objectivePlayerStats = getObjectivePlayerStats();
+  console.warn("[DEBUG] objectivePlayerStats size:", objectivePlayerStats.size);
+  if (objectivePlayerStats.size) return objectivePlayerStats;
 
-  for (const [id, st] of raw) {
-    let kills;
-    if (st && st.kills !== undefined) {
-      kills = st.kills;
+  const rawPlayerStats = getPlayerStats();
+  console.warn("[DEBUG] rawPlayerStats:", rawPlayerStats ? rawPlayerStats.size : "null/undefined");
+  const playerStatsMap = new Map();
+  if (!rawPlayerStats || !rawPlayerStats.size) {
+    console.warn("[DEBUG] No rawPlayerStats found, returning empty map");
+    return playerStatsMap;
+  }
+
+  const playerEntries = Array.from(rawPlayerStats.entries());
+  for (let i = 0; i < playerEntries.length; i++) {
+    const playerId = playerEntries[i][0];
+    const playerStats = playerEntries[i][1];
+
+    let killCount;
+    if (playerStats && playerStats.kills !== undefined) {
+      killCount = playerStats.kills;
     } else {
-      kills = 0;
+      killCount = 0;
     }
 
-    let deaths;
-    if (st && st.deaths !== undefined) {
-      deaths = st.deaths;
+    let deathCount;
+    if (playerStats && playerStats.deaths !== undefined) {
+      deathCount = playerStats.deaths;
     } else {
-      deaths = 0;
+      deathCount = 0;
     }
 
-    if (!kills && !deaths) continue;
+    if (!killCount && !deathCount) continue;
 
-    let name;
-    if (getPlayerName(id)) {
-      name = getPlayerName(id);
+    let playerName;
+    if (getPlayerName(playerId)) {
+      playerName = getPlayerName(playerId);
     } else {
-      name = id;
+      playerName = playerId;
     }
 
     let teamInfo;
-    if (st && st.teamId) {
-      teamInfo = getTeamInfo(st.teamId);
+    if (playerStats && playerStats.teamId) {
+      teamInfo = getTeamInfo(playerStats.teamId);
     } else {
       teamInfo = null;
     }
 
     let teamId;
-    if (st && st.teamId !== undefined) {
-      teamId = st.teamId;
+    if (playerStats && playerStats.teamId !== undefined) {
+      teamId = playerStats.teamId;
     } else {
       teamId = null;
     }
 
     let teamLabel;
     if (teamInfo) {
-      teamLabel = `${teamInfo.color}${teamInfo.name}`;
+      teamLabel = teamInfo.color + teamInfo.name;
     } else {
       teamLabel = null;
     }
 
-    map.set(name, {
-      kills,
-      deaths,
+    playerStatsMap.set(playerName, {
+      kills: killCount,
+      deaths: deathCount,
       teamId,
       teamLabel,
     });
   }
 
-  return map;
+  return playerStatsMap;
 }
 
-function processScoreEntry(score, map) {
-  let value;
-  if (score && score.score !== undefined) {
-    value = score.score;
+// ======================================================
+// processScoreEntry (ประมวลผลคะแนนดิบจากข้อมูลประวัติการฆ่า)
+// ======================================================
+function processScoreEntry(scoreEntry, playerStatsMap) {
+  let scoreValue;
+  if (scoreEntry && scoreEntry.score !== undefined) {
+    scoreValue = scoreEntry.score;
   } else {
-    value = 0;
+    scoreValue = 0;
   }
 
-  if (value <= 0) return;
+  if (scoreValue <= 0) return;
 
-  let key;
-  if (score && score.participant && score.participant.displayName) {
-    key = score.participant.displayName;
+  let displayName;
+  if (scoreEntry && scoreEntry.participant && scoreEntry.participant.displayName) {
+    displayName = scoreEntry.participant.displayName;
   } else {
     return;
   }
 
-  const parts = key.split(" | Victim : ");
-  if (parts.length !== 2) return;
+  const nameParts = displayName.split(" | Victim : ");
+  if (nameParts.length !== 2) return;
 
-  const killerName = parts[0].replace("Kill: ", "").trim();
-  const victimName = parts[1].trim();
+  const killerName = nameParts[0].replace("Kill: ", "").trim();
+  const victimName = nameParts[1].trim();
   if (!killerName || !victimName) return;
 
-  let killerEntry;
-  if (map.has(killerName)) {
-    killerEntry = map.get(killerName);
+  let killerStats;
+  if (playerStatsMap.has(killerName)) {
+    killerStats = playerStatsMap.get(killerName);
   } else {
-    killerEntry = { kills: 0, deaths: 0, teamId: null, teamLabel: null };
+    killerStats = { kills: 0, deaths: 0, teamId: null, teamLabel: null };
   }
-  killerEntry.kills += value;
-  map.set(killerName, killerEntry);
+  killerStats.kills += scoreValue;
+  playerStatsMap.set(killerName, killerStats);
 
-  let victimEntry;
-  if (map.has(victimName)) {
-    victimEntry = map.get(victimName);
+  let victimStats;
+  if (playerStatsMap.has(victimName)) {
+    victimStats = playerStatsMap.get(victimName);
   } else {
-    victimEntry = { kills: 0, deaths: 0, teamId: null, teamLabel: null };
+    victimStats = { kills: 0, deaths: 0, teamId: null, teamLabel: null };
   }
-  victimEntry.deaths += value;
-  map.set(victimName, victimEntry);
+  victimStats.deaths += scoreValue;
+  playerStatsMap.set(victimName, victimStats);
 }
 
+// ======================================================
+// getObjectivePlayerStats (ดึงสถิติผู้เล่นจากระบบ Scoreboard Objective)
+// ======================================================
 function getObjectivePlayerStats() {
-  const obj = getKdHistoryObjective();
-  const map = new Map();
-  if (!obj) return map;
+  console.warn("[DEBUG] getObjectivePlayerStats() called");
 
-  const scores = obj.getScores();
-  if (!scores || !scores.length) return map;
+  const kdHistoryObjective = getKdHistoryObjective();
+  console.warn("[DEBUG] kdHistoryObjective:", kdHistoryObjective ? "exists" : "null/undefined");
 
-  for (let i = 0; i < scores.length; i++) {
-    processScoreEntry(scores[i], map);
+  const playerStatsMap = new Map();
+  if (!kdHistoryObjective) {
+    console.warn("[DEBUG] No kdHistoryObjective found");
+    return playerStatsMap;
   }
 
-  return map;
+  const objectiveScores = kdHistoryObjective.getScores();
+  console.warn("[DEBUG] objectiveScores length:", objectiveScores ? objectiveScores.length : "null/undefined");
+  if (!objectiveScores || !objectiveScores.length) {
+    console.warn("[DEBUG] No objectiveScores found");
+    return playerStatsMap;
+  }
+
+  for (let i = 0; i < objectiveScores.length; i++) {
+    processScoreEntry(objectiveScores[i], playerStatsMap);
+  }
+
+  return playerStatsMap;
 }
 
+// ======================================================
+//
+//      TEXT BUILDERS - ฟังก์ชันสร้างข้อความแสดงผล
+//
+// ======================================================
+// buildEmptyPlayerText (สร้างข้อความกรณีไม่มีข้อมูลผู้เล่นในตาราง)
+// ======================================================
 function buildEmptyPlayerText() {
   return `§eTop ${MAX_PLAYERS} Players (Kills)\n\n§7None (0)\n`;
 }
 
-// สร้างรายการผู้เล่นที่เรียงลำดับแล้วเพื่อแสดงผลในตารางคะแนน
-function getPlayerText(statsMap) {
-  const list = [];
-
-  // สร้างรายชื่อผู้เล่นพร้อมจำนวนการสังหาร/การตาย
-  for (const [name, st] of statsMap) {
-    if (!st.kills && !st.deaths) continue;
-    list.push({ name, st });
+// ======================================================
+// getPlayerText (จัดรูปแบบข้อความตารางคะแนนผู้เล่น (รองรับ Memoization))
+// ======================================================
+function getPlayerText(playerStatsMap) {
+  // ตรวจสอบดูว่าเราสามารถใช้ผลลัพธ์ที่แคชไว้ได้หรือไม่
+  const currentHash = generateStatsHash(playerStatsMap);
+  if (currentHash === lastStatsHash && cachedPlayerText) {
+    return cachedPlayerText;
   }
 
-  list.sort((a, b) => b.st.kills - a.st.kills || a.name.localeCompare(b.name));
-  if (list.length > MAX_PLAYERS) list.length = MAX_PLAYERS;
-  if (!list.length) return buildEmptyPlayerText();
+  const playerList = [];
 
-  let text = `§eTop ${MAX_PLAYERS} Players (Kills)\n\n`;
-  for (let i = 0; i < list.length; i++) {
-    const item = list[i];
-    const color = getRankColor(i);
+  // สร้างรายชื่อผู้เล่นพร้อมจำนวนการสังหาร/การตาย
+  const statsEntries = Array.from(playerStatsMap.entries());
+  for (let i = 0; i < statsEntries.length; i++) {
+    const playerName = statsEntries[i][0];
+    const playerStats = statsEntries[i][1];
+    if (!playerStats.kills && !playerStats.deaths) continue;
+    playerList.push({ name: playerName, st: playerStats });
+  }
+
+  playerList.sort((a, b) => {
+    if (b.st.kills !== a.st.kills) {
+      return b.st.kills - a.st.kills;
+    } else {
+      return a.name.localeCompare(b.name);
+    }
+  });
+
+  if (playerList.length > MAX_PLAYERS) {
+    playerList.length = MAX_PLAYERS;
+  }
+
+  if (!playerList.length) {
+    cachedPlayerText = buildEmptyPlayerText();
+    lastStatsHash = currentHash;
+    return cachedPlayerText;
+  }
+
+  let leaderboardText = `§eTop ${MAX_PLAYERS} Players (Kills)\n\n`;
+  for (let i = 0; i < playerList.length; i++) {
+    const playerItem = playerList[i];
+    const rankColor = getRankColor(i);
 
     let teamSuffix;
-    if (item.st.teamLabel) {
-      teamSuffix = ` §8[${item.st.teamLabel}§8]`;
+    if (playerItem.st.teamLabel) {
+      teamSuffix = ` §8[${playerItem.st.teamLabel}§8]`;
     } else {
       teamSuffix = "";
     }
 
-    text += `${color}#${i + 1} §a${item.name}${teamSuffix} §f- §c${item.st.kills} Kills §8(§4${item.st.deaths} Deaths§8)\n`;
+    leaderboardText += `${rankColor}#${i + 1} §a${playerItem.name}${teamSuffix} §f- §c${playerItem.st.kills} Kills §8(§4${playerItem.st.deaths} Deaths§8)\n`;
   }
 
-  return text;
+  // บันทึกผลลัพธ์ลงในแคช
+  cachedPlayerText = leaderboardText;
+  lastStatsHash = currentHash;
+  return leaderboardText;
 }
 
+// ======================================================
+// buildEmptyTeamText (สร้างข้อความกรณีไม่มีข้อมูลทีมในตาราง)
+// ======================================================
 function buildEmptyTeamText() {
   return `§bTop ${MAX_TEAMS} Teams (Kills)\n\n§7None (0)\n`;
 }
 
-function buildTeamText(list) {
-  if (!list.length) return buildEmptyTeamText();
+// ======================================================
+// buildTeamText (จัดรูปแบบข้อความตารางคะแนนทีม)
+// ======================================================
+function buildTeamText(teamList) {
+  if (!teamList.length) return buildEmptyTeamText();
 
-  let text = `§bTop ${MAX_TEAMS} Teams (Kills)\n\n`;
-  for (let i = 0; i < list.length; i++) {
-    const color = getRankColor(i);
+  let teamLeaderboardText = `§bTop ${MAX_TEAMS} Teams (Kills)\n\n`;
+  for (let i = 0; i < teamList.length; i++) {
+    const rankColor = getRankColor(i);
 
-    let members;
-    if (list[i].members !== undefined) {
-      members = list[i].members;
+    let memberCount;
+    if (teamList[i].members !== undefined) {
+      memberCount = teamList[i].members;
     } else {
-      members = 0;
+      memberCount = 0;
     }
 
-    text += `${color}#${i + 1} ${list[i].name} §f: §c${list[i].kills} Kills §7(${members} Players)\n`;
+    teamLeaderboardText += `${rankColor}#${i + 1} ${teamList[i].name} §f: §c${teamList[i].kills} Kills §7(${memberCount} Players)\n`;
   }
 
-  return text;
+  return teamLeaderboardText;
 }
 
-function getObjectiveTeamList(obj) {
-  const scores = obj.getScores();
-  const teams = getTeams();
-  const list = [];
+// ======================================================
+//
+//       TEAM DATA PROCESSING - การประมวลผลข้อมูลทีม
+//
+// ======================================================
+// getObjectiveTeamList (ดึงและจัดลำดับคะแนนทีมจาก Scoreboard Objective)
+// ======================================================
+function getObjectiveTeamList(teamKillObjective) {
+  const objectiveScores = teamKillObjective.getScores();
+  const allTeams = getTeams();
+  const teamList = [];
 
-  console.warn("[DEBUG] getObjectiveTeamList - scores length:", scores ? scores.length : 0);
+  let scoresLength;
+  if (objectiveScores) {
+    scoresLength = objectiveScores.length;
+  } else {
+    scoresLength = 0;
+  }
+  console.warn("[DEBUG] getObjectiveTeamList - scores length:", scoresLength);
 
-  if (!scores || !scores.length) return list;
+  if (!objectiveScores || !objectiveScores.length) return teamList;
 
-  for (let i = 0; i < scores.length; i++) {
-    const score = scores[i];
-    let displayName;
-    if (score && score.participant && score.participant.displayName) {
-      displayName = score.participant.displayName;
+  // สร้างแผนที่ค้นหาทีมสำหรับการเข้าถึง
+  const teamMap = new Map();
+  for (let i = 0; i < allTeams.length; i++) {
+    const team = allTeams[i];
+    const teamLabel = team.color + team.name;
+    teamMap.set(teamLabel, { team, index: i });
+  }
+
+  for (let i = 0; i < objectiveScores.length; i++) {
+    const scoreEntry = objectiveScores[i];
+    let teamDisplayName;
+    if (scoreEntry && scoreEntry.participant && scoreEntry.participant.displayName) {
+      teamDisplayName = scoreEntry.participant.displayName;
     } else {
       continue;
     }
 
-    const scoreValue = score.score;
+    const teamScoreValue = scoreEntry.score;
 
-    console.warn(`[DEBUG] Score: "${displayName}" = ${scoreValue}`);
+    console.warn('[DEBUG] Score: "' + teamDisplayName + '" = ' + teamScoreValue);
 
-    if (scoreValue <= 0) continue;
+    if (teamScoreValue <= 0) continue;
 
-    let matchedTeam = null;
-    for (let j = 0; j < teams.length; j++) {
-      const label = `${teams[j].color}${teams[j].name}`;
-      if (displayName === label) {
-        matchedTeam = teams[j];
-        break;
-      }
-    }
-
-    if (!matchedTeam) {
-      console.warn(`[DEBUG] No team matched for displayName: "${displayName}"`);
+    // การค้นหาทีม
+    const teamData = teamMap.get(teamDisplayName);
+    if (!teamData) {
+      console.warn('[DEBUG] No team matched for displayName: "' + teamDisplayName + '"');
       continue;
     }
 
-    list.push({
-      name: displayName,
-      kills: scoreValue,
-      members: getPlayersByTeam(matchedTeam.id).length,
-      order: teams.findIndex((team) => team.id === matchedTeam.id),
+    teamList.push({
+      name: teamDisplayName,
+      kills: teamScoreValue,
+      members: getPlayersByTeam(teamData.team.id).length,
+      order: teamData.index,
     });
   }
 
-  console.warn("[DEBUG] Final objective list:", list.length, list);
+  console.warn("[DEBUG] Final objective list:", teamList.length, teamList);
 
-  list.sort((a, b) => b.kills - a.kills || a.order - b.order);
-  if (list.length > MAX_TEAMS) list.length = MAX_TEAMS;
-  return list;
+  teamList.sort((a, b) => {
+    if (b.kills !== a.kills) {
+      return b.kills - a.kills;
+    } else {
+      return a.order - b.order;
+    }
+  });
+
+  if (teamList.length > MAX_TEAMS) {
+    teamList.length = MAX_TEAMS;
+  }
+  return teamList;
 }
 
+// ======================================================
+// getRuntimeTeamList (ดึงข้อมูลทีมจากหน่วยความจำกรณีไม่มี Scoreboard)
+// ======================================================
 function getRuntimeTeamList() {
-  const teams = getTeams();
-  const tStats = getTeamStats();
-  const list = [];
-  if (!teams || !teams.length) return list;
+  const allTeams = getTeams();
+  const teamStatsMap = getTeamStats();
+  const teamList = [];
+  if (!allTeams || !allTeams.length) return teamList;
 
-  for (let i = 0; i < teams.length; i++) {
-    const team = teams[i];
+  for (let i = 0; i < allTeams.length; i++) {
+    const teamInfo = allTeams[i];
 
-    let st;
-    if (tStats && tStats.size) {
-      st = tStats.get(team.id);
+    let teamStats;
+    if (teamStatsMap && teamStatsMap.size) {
+      teamStats = teamStatsMap.get(teamInfo.id);
     } else {
-      st = null;
+      teamStats = null;
     }
 
-    const members = getPlayersByTeam(team.id).length;
+    const memberCount = getPlayersByTeam(teamInfo.id).length;
 
-    let kills;
-    if (st && st.kills !== undefined) {
-      kills = st.kills;
+    let killCount;
+    if (teamStats && teamStats.kills !== undefined) {
+      killCount = teamStats.kills;
     } else {
-      kills = 0;
+      killCount = 0;
     }
 
-    list.push({
-      name: `${team.color}${team.name}`,
-      kills,
-      members,
+    teamList.push({
+      name: teamInfo.color + teamInfo.name,
+      kills: killCount,
+      members: memberCount,
       order: i,
     });
   }
 
-  list.sort((a, b) => b.kills - a.kills || a.order - b.order);
-  if (list.length > MAX_TEAMS) list.length = MAX_TEAMS;
-  return list;
+  teamList.sort((a, b) => {
+    if (b.kills !== a.kills) {
+      return b.kills - a.kills;
+    } else {
+      return a.order - b.order;
+    }
+  });
+
+  if (teamList.length > MAX_TEAMS) {
+    teamList.length = MAX_TEAMS;
+  }
+  return teamList;
 }
 
+// ======================================================
+// getTeamText (เลือกดึงข้อมูลทีมจากช่องทางที่เหมาะสมที่สุด พร้อม Caching)
+// ======================================================
 function getTeamText() {
-  const obj = getTeamKillObjective();
-  if (obj) {
-    const objectiveList = getObjectiveTeamList(obj);
-    if (objectiveList.length) return buildTeamText(objectiveList);
+  const teamKillObjective = getTeamKillObjective();
+  let teamList = [];
+
+  if (teamKillObjective) {
+    const objectiveTeamList = getObjectiveTeamList(teamKillObjective);
+    if (objectiveTeamList.length) {
+      teamList = objectiveTeamList;
+    } else {
+      teamList = getRuntimeTeamList();
+    }
+  } else {
+    teamList = getRuntimeTeamList();
   }
 
-  return buildTeamText(getRuntimeTeamList());
+  // สร้าง hash สำหรับ team data เพื่อตรวจสอบการเปลี่ยนแปลง
+  let teamHash = "";
+  for (let i = 0; i < teamList.length; i++) {
+    const team = teamList[i];
+    teamHash += `${team.name}${team.kills}${team.members}${team.order}`;
+  }
+
+  // ตรวจสอบว่าข้อมูลเปลี่ยนแปลงหรือไม่
+  if (teamHash === lastTeamHash && cachedTeamText) {
+    return cachedTeamText;
+  }
+
+  // สร้างข้อความใหม่และเก็บใน cache
+  cachedTeamText = buildTeamText(teamList);
+  lastTeamHash = teamHash;
+
+  return cachedTeamText;
 }
 
+// ======================================================
+//
+// DEATHS LEADERBOARD - ตารางคะแนนการตาย
+//
+// ======================================================
+// buildEmptyDeathsText (สร้างข้อความกรณีไม่มีข้อมูลการตายในตาราง)
+// ======================================================
 function buildEmptyDeathsText() {
   return `§cTop ${MAX_PLAYERS} Deaths\n\n§7None (0)\n`;
 }
 
-function getDeathsText(statsMap) {
-  const list = [];
-
-  for (const [name, st] of statsMap) {
-    if (!st.deaths) continue;
-    list.push({ name, st });
+// ======================================================
+// getDeathsText (จัดรูปแบบข้อความตารางคะแนนการตาย (รองรับ Memoization))
+// ======================================================
+function getDeathsText(playerStatsMap) {
+  // ตรวจสอบดูว่าเราสามารถใช้ผลลัพธ์ที่แคชไว้ได้หรือไม่
+  const currentHash = generateStatsHash(playerStatsMap);
+  if (currentHash === lastStatsHash && cachedDeathsText) {
+    return cachedDeathsText;
   }
 
-  list.sort((a, b) => b.st.deaths - a.st.deaths || a.name.localeCompare(b.name));
-  if (list.length > MAX_PLAYERS) list.length = MAX_PLAYERS;
-  if (!list.length) return buildEmptyDeathsText();
+  const deathsList = [];
 
-  let text = `§cTop ${MAX_PLAYERS} Deaths\n\n`;
-  for (let i = 0; i < list.length; i++) {
-    const item = list[i];
-    const color = getRankColor(i);
+  const statsEntries = Array.from(playerStatsMap.entries());
+  for (let i = 0; i < statsEntries.length; i++) {
+    const playerName = statsEntries[i][0];
+    const playerStats = statsEntries[i][1];
+    if (!playerStats.deaths) continue;
+    deathsList.push({ name: playerName, st: playerStats });
+  }
+
+  deathsList.sort((a, b) => {
+    if (b.st.deaths !== a.st.deaths) {
+      return b.st.deaths - a.st.deaths;
+    } else {
+      return a.name.localeCompare(b.name);
+    }
+  });
+
+  if (deathsList.length > MAX_PLAYERS) {
+    deathsList.length = MAX_PLAYERS;
+  }
+
+  if (!deathsList.length) {
+    cachedDeathsText = buildEmptyDeathsText();
+    return cachedDeathsText;
+  }
+
+  let deathsLeaderboardText = `§cTop ${MAX_PLAYERS} Deaths\n\n`;
+  for (let i = 0; i < deathsList.length; i++) {
+    const playerItem = deathsList[i];
+    const rankColor = getRankColor(i);
 
     let teamSuffix;
-    if (item.st.teamLabel) {
-      teamSuffix = ` §8[${item.st.teamLabel}§8]`;
+    if (playerItem.st.teamLabel) {
+      teamSuffix = ` §8[${playerItem.st.teamLabel}§8]`;
     } else {
       teamSuffix = "";
     }
 
-    text += `${color}#${i + 1} §a${item.name}${teamSuffix} §f- §4${item.st.deaths} Deaths §8(§c${item.st.kills} Kills§8)\n`;
+    deathsLeaderboardText += `${rankColor}#${i + 1} §a${playerItem.name}${teamSuffix} §f- §4${playerItem.st.deaths} Deaths §8(§c${playerItem.st.kills} Kills§8)\n`;
   }
 
-  return text;
+  // บันทึกผลลัพธ์ลงในแคช
+  cachedDeathsText = deathsLeaderboardText;
+  return deathsLeaderboardText;
 }
 
-function collectNpcsByTag(npcs) {
-  const pNpcs = [];
-  const tNpcs = [];
-  const dNpcs = [];
+// ======================================================
+//
+//          NPC MANAGEMENT - การจัดการ NPC
+//
+// ======================================================
+// collectNpcsByTag (แยกกลุ่ม NPC ตามลำดับ index)
+// ======================================================
+function collectNpcsByTag(allNpcs) {
+  const teamNpcs = []; // index 0 = Top Team Kill
+  const playerNpcs = []; // index 1 = Top Player Kill
+  const deathNpcs = []; // index 2 = Top Player Deaths
 
-  for (let i = 0; i < npcs.length; i++) {
-    const npc = npcs[i];
-    if (!npc || !npc.isValid) continue;
+  console.warn("[DEBUG] Collecting NPCs by index from", allNpcs.length, "total NPCs");
 
-    const tag = getLeaderboardNpcTag(npc);
-    if (tag === "lb_players") {
-      pNpcs.push(npc);
-    } else if (tag === "lb_teams") {
-      tNpcs.push(npc);
-    } else if (tag === "lb_deaths") {
-      dNpcs.push(npc);
+  for (let i = 0; i < allNpcs.length && i < 3; i++) {
+    const npcEntity = allNpcs[i];
+    if (!npcEntity || !npcEntity.isValid) continue;
+
+    // กำหนด NPC ตามลำดับ index
+    if (i === 0) {
+      teamNpcs.push(npcEntity);
+      console.warn("[DEBUG] NPC", i, "assigned to Teams leaderboard");
+    } else if (i === 1) {
+      playerNpcs.push(npcEntity);
+      console.warn("[DEBUG] NPC", i, "assigned to Players leaderboard");
+    } else if (i === 2) {
+      deathNpcs.push(npcEntity);
+      console.warn("[DEBUG] NPC", i, "assigned to Deaths leaderboard");
     }
   }
 
-  return { pNpcs, tNpcs, dNpcs };
+  console.warn("[DEBUG] Collected NPCs - Teams:", teamNpcs.length, "Players:", playerNpcs.length, "Deaths:", deathNpcs.length);
+  return { pNpcs: playerNpcs, tNpcs: teamNpcs, dNpcs: deathNpcs };
 }
 
+// ======================================================
+//
+//          RENDERING SYSTEM - ระบบการแสดงผล
+//
+// ======================================================
+// renderBoard (ฟังก์ชันหลักในการอัปเดตข้อความบน NPC ทั้งหมด)
+// ======================================================
 export function renderBoard() {
-  if (system.currentTick - lastRenderTick < RENDER_INTERVAL_TICKS) return;
-  lastRenderTick = system.currentTick;
+  console.warn("[DEBUG] renderBoard() called");
 
   refreshPlayerCaches();
 
-  const dim = world.getDimension("overworld");
+  // ค้นหา NPCs ใหม่ทุกครั้ง
+  const overworldDimension = world.getDimension("overworld");
+  let allNpcs = [];
 
-  let npcs;
   try {
-    npcs = dim.getEntities({ type: "minecraft:npc" });
-  } catch {
+    allNpcs = overworldDimension.getEntities(NPC_QUERY_OPTIONS);
+    console.warn("[DEBUG] Found NPCs:", allNpcs.length);
+  } catch (error) {
+    console.warn("[DEBUG] Error getting NPCs:", error);
     return;
   }
 
-  if (!npcs.length) return;
-
-  const { pNpcs, tNpcs, dNpcs } = collectNpcsByTag(npcs);
-  if (!pNpcs.length && !tNpcs.length && !dNpcs.length) return;
-
-  const stats = getStats();
-
-  if (pNpcs.length) {
-    updateNpcText(pNpcs, UI.HEAD + getPlayerText(stats) + UI.FOOT);
+  if (!allNpcs.length) {
+    console.warn("[DEBUG] No NPCs found, exiting renderBoard");
+    return;
   }
 
-  if (tNpcs.length) {
-    updateNpcText(tNpcs, UI.HEAD + getTeamText() + UI.FOOT);
+  const { pNpcs: playerNpcs, tNpcs: teamNpcs, dNpcs: deathNpcs } = collectNpcsByTag(allNpcs);
+  console.warn("[DEBUG] NPC counts - Teams:", teamNpcs.length, "Players:", playerNpcs.length, "Deaths:", deathNpcs.length);
+
+  if (!teamNpcs.length && !playerNpcs.length && !deathNpcs.length) {
+    console.warn("[DEBUG] No leaderboard NPCs found with proper tags");
+    return;
   }
 
-  if (dNpcs.length) {
-    updateNpcText(dNpcs, UI.HEAD + getDeathsText(stats) + UI.FOOT);
+  const playerStats = getStats();
+  console.warn("[DEBUG] Final playerStats size:", playerStats.size);
+
+  if (teamNpcs.length) {
+    const teamText = getTeamText();
+    console.warn("[DEBUG] Team text generated:", `${teamText.substring(0, 100)}...`);
+    updateNpcText(teamNpcs, `${UI.HEAD}${teamText}${UI.FOOT}`);
+  }
+
+  if (playerNpcs.length) {
+    const playerText = getPlayerText(playerStats);
+    console.warn("[DEBUG] Player text generated:", `${playerText.substring(0, 100)}...`);
+    updateNpcText(playerNpcs, `${UI.HEAD}${playerText}${UI.FOOT}`);
+  }
+
+  if (deathNpcs.length) {
+    const deathsText = getDeathsText(playerStats);
+    console.warn("[DEBUG] Deaths text generated:", `${deathsText.substring(0, 100)}...`);
+    updateNpcText(deathNpcs, `${UI.HEAD}${deathsText}${UI.FOOT}`);
   }
 }
 
-function updateNpcText(npcs, text) {
-  for (let i = 0; i < npcs.length; i++) {
-    const npc = npcs[i];
-    if (!npc || !npc.isValid) continue;
-    if (typeof npc.nameTag !== "string") continue;
-    if (npc.nameTag === text) continue;
-    npc.nameTag = text;
+// ======================================================
+// updateNpcText (ตรวจสอบและอัปเดต nameTag ของ NPC เฉพาะเมื่อมีการเปลี่ยนแปลง)
+// ======================================================
+function updateNpcText(npcList, displayText) {
+  for (let i = 0; i < npcList.length; i++) {
+    const npcEntity = npcList[i];
+    if (!npcEntity || !npcEntity.isValid) continue;
+    if (typeof npcEntity.nameTag !== "string") continue;
+    if (npcEntity.nameTag === displayText) continue;
+    npcEntity.nameTag = displayText;
   }
 }
 
+// ======================================================
+// spawnLeaderboardNPCNow (สร้าง NPC ตารางคะแนนในตำแหน่งที่กำหนดหากยังไม่มี)
+// ======================================================
+function spawnLeaderboardNPCNow() {
+  const overworldDimension = world.getDimension("overworld");
+
+  // ลบ NPC เก่าทั้งหมดในพื้นที่
+  const existingNpcs = overworldDimension.getEntities(NPC_QUERY_OPTIONS);
+  console.warn("[DEBUG] Removing existing NPCs:", existingNpcs.length);
+
+  for (let i = 0; i < existingNpcs.length; i++) {
+    existingNpcs[i].remove();
+  }
+
+  // สร้าง NPC ใหม่ทั้งหมด
+  for (let i = 0; i < NPCS.length; i++) {
+    const npcConfig = NPCS[i];
+
+    try {
+      const newNpcEntity = overworldDimension.spawnEntity("minecraft:npc", {
+        x: npcConfig.x,
+        y: npcConfig.y,
+        z: npcConfig.z,
+      });
+
+      // ตั้งชื่อ NPC ตาม index
+      if (i === 0) {
+        newNpcEntity.nameTag = "§b§lTOP TEAMS (KILLS)";
+      } else if (i === 1) {
+        newNpcEntity.nameTag = "§e§lTOP PLAYERS (KILLS)";
+      } else if (i === 2) {
+        newNpcEntity.nameTag = "§c§lTOP PLAYERS (DEATHS)";
+      }
+
+      console.warn("[Leaderboard] Spawned new NPC at index:", i);
+    } catch (error) {
+      console.warn("[Leaderboard] Failed to spawn NPC at:", npcConfig.x, npcConfig.y, npcConfig.z, error);
+    }
+  }
+
+  // บังคับอัปเดตข้อมูลลีดเดอร์บอร์ดหลังจากสร้างเสร็จ
+  updateLeaderboard();
+}
+
+// ======================================================
+// updateLeaderboard (รีเซ็ตแคชและบังคับอัปเดตข้อมูลตารางคะแนนทันที)
+// ======================================================
+export function updateLeaderboard() {
+  system.runTimeout(() => {
+    lastStatsHash = "";
+    lastTeamHash = "";
+    cachedPlayerText = "";
+    cachedTeamText = "";
+    cachedDeathsText = "";
+
+    refreshPlayerCaches();
+    renderBoard();
+    console.warn("[Leaderboard] Auto updated");
+  }, 40);
+}
+
+// ======================================================
+// spawnLeaderboardNPC (หน่วงเวลาการสร้าง NPC เพื่อรอให้พื้นโหลดสำเร็จ)
+// ======================================================
 export function spawnLeaderboardNPC() {
   system.runTimeout(spawnLeaderboardNPCNow, 20);
 }
 
-function spawnLeaderboardNPCNow() {
-  const dim = world.getDimension("overworld");
-
-  for (let i = 0; i < NPCS.length; i++) {
-    const cfg = NPCS[i];
-    const existing = dim.getEntities({ type: "minecraft:npc", tags: [cfg.tag] });
-
-    for (let j = 0; j < existing.length; j++) {
-      const npc = existing[j];
-      if (!npc || !npc.isValid) continue;
-      npc.remove();
-    }
-
-    try {
-      const newNpc = dim.spawnEntity("minecraft:npc", {
-        x: cfg.x,
-        y: cfg.y,
-        z: cfg.z,
-      });
-      newNpc.addTag(cfg.tag);
-    } catch {
-      console.warn("[Leaderboard] Chunk not loaded at spawn point:", cfg.x, cfg.y, cfg.z);
-    }
-  }
-}
-
-function queueLeaderboardInteract(player) {
-  leaderboardInteractQueue.push(player);
-  if (leaderboardInteractScheduled) return;
-
-  leaderboardInteractScheduled = true;
-  system.run(drainLeaderboardInteractQueue);
-}
-
-function drainLeaderboardInteractQueue() {
-  leaderboardInteractScheduled = false;
-
-  while (leaderboardInteractQueue.length > 0) {
-    const player = leaderboardInteractQueue.shift();
-    if (!player || !player.isValid) continue;
-    if (!player.isSneaking) continue;
-
-    renderBoard();
-    player.playSound("random.orb", { volume: 0.5, pitch: 1 });
-    player.onScreenDisplay.setActionBar("§aLeaderboard Updated!");
-  }
-}
-
-function handleLeaderboardNpcInteract(ev) {
-  const target = ev.target;
-  const player = ev.player;
-
-  if (!target) return;
-  if (target.typeId !== "minecraft:npc") return;
-
-  if (!target || !target.isValid) return;
-  if (getLeaderboardNpcTag(target) === "") return;
-
-  ev.cancel = true;
-
-  if (!player || !player.isValid) return;
-  if (!player.hasTag("admin")) {
-    system.run(() => {
-      player.onScreenDisplay.setActionBar("You don't have permission");
-    });
-    return;
-  }
-
-  queueLeaderboardInteract(player);
-}
-
-world.beforeEvents.playerInteractWithEntity.subscribe(handleLeaderboardNpcInteract);
 system.run(renderBoard);
+
+// ======================================================
+// EVENT HANDLERS - ป้องกันการเปิด NPC Dialog
+// ======================================================
+world.beforeEvents.playerInteractWithEntity.subscribe((eventData) => {
+  const { target } = eventData;
+  if (target.typeId === "minecraft:npc") {
+    eventData.cancel = true;
+  }
+});

@@ -8,38 +8,26 @@ import { playerSetupClearItemsKeepCompass } from "../system/UtilUhcMatchManager.
 //@ts-ignore
 import { TEAMS, CONFIG } from "./UtilTeamManaer.js";
 
-// ======================================================
 // Player Cache (cache ผู้เล่น runtime)
-// ======================================================
 let allPlayersCache = [];
 let uhcPlayersCache = [];
 let allPlayersCacheIds = new Set();
 
-// ======================================================
 // Alive Team Dirty Handler (callback เมื่อ team เปลี่ยน)
-// ======================================================
 let aliveTeamDirtyHandler = () => {};
 
-// ======================================================
-// registerAliveTeamDirtyHandler (register callback)
-// ======================================================
+// // registerAliveTeamDirtyHandler (register callback)
 export function registerAliveTeamDirtyHandler(handler) {
   aliveTeamDirtyHandler = typeof handler === "function" ? handler : () => {};
 }
 
-// ======================================================
 // TEAM_LOOKUP (map id → team info)
-// ======================================================
 const TEAM_LOOKUP = new Map(TEAMS.map((t) => [t.id, t]));
 
-// ======================================================
 // TEAM_INDEX_MAP (map id → index)
-// ======================================================
 const TEAM_INDEX_MAP = new Map(TEAMS.map((t, i) => [t.id, i]));
 
-// ======================================================
 // Team Runtime State (count + player index)
-// ======================================================
 const teamCounts = new Map(); // teamId → จำนวนผู้เล่น
 const teamPlayerIndex = new Map(); // teamId → Set(playerId)
 
@@ -51,25 +39,19 @@ for (const t of TEAMS) {
   teamCounts.set(t.id, 0);
 }
 
-// ======================================================
 // Scoreboard State
-// ======================================================
 let isGameRunning = false;
 let cachedBoard;
 let sidebarFlushTask = null;
 const dirtySidebarTeams = new Set();
 
-// ======================================================
 // KD Config (ระบบ Kill / Death)
-// ======================================================
 const KD = Object.freeze({
   SCORE_HISTORY_OBJECTIVE: "kdhistory",
   HIT_TIMEOUT_SECONDS: 8,
 });
 
-// ======================================================
 // Runtime Stats / Config ค่าคงที่ + state สำหรับ UHC runtime
-// ======================================================
 const HIT_TIMEOUT_TICKS = 20 * KD.HIT_TIMEOUT_SECONDS;
 const MULTI_TIMEOUT_TICKS = 20 * 16;
 
@@ -1054,7 +1036,6 @@ function createCacheProxy(key) {
 // Player Cache Proxies + UHC Player Registry
 // จัดการ cache ผู้เล่น + UHC state (O(1) size)
 // ======================================================
-
 const uhcPlayerIds = {
   _size: 0,
 
@@ -1705,7 +1686,7 @@ function processKillerRewards(killer, victimPlayer, victimTeamId) {
   }
   playerStats.set(killerId, killerPs);
 
-  // team stats=
+  // team stats
   const teamEntry = teamStats.get(killerTeamId);
   if (teamEntry) {
     teamEntry.kills++;
@@ -1959,9 +1940,8 @@ function openTeamMenu(player) {
   form.show(player).then((res) => {
     if (!res || res.canceled) return;
     const selection = res.selection;
-    // =========================
+
     // เลือกทีม
-    // =========================
     if (selection < teamsLen) {
       const selectedTeam = TEAMS[selection];
       if (currentTeamId === selectedTeam.id) {
@@ -1985,9 +1965,7 @@ function openTeamMenu(player) {
       return;
     }
 
-    // =========================
     // action
-    // =========================
     const actionIndex = selection - teamsLen;
     switch (actionIndex) {
       case 0: {
@@ -2114,9 +2092,7 @@ function killList(player) {
   const form = new ActionFormData();
   form.title("Kill Death History");
 
-  // =========================
   // ไม่มีข้อมูล
-  // =========================
   if (history === "") {
     form.body("History is empty.");
     form.button("Console");
@@ -2133,9 +2109,7 @@ function killList(player) {
     return;
   }
 
-  // =========================
   // รวม Kill
-  // =========================
   let body = "§f=== TOTAL KILLS ===\n";
   const sortedTotals = Array.from(totals.entries()).sort(function (a, b) {
     return b[1] - a[1];
@@ -2352,6 +2326,7 @@ function teleportShowAllPlayers(player, mode) {
     }
     form.button(label, "textures/ui/multiplayer_glyph_color");
   }
+
   form.button("Back");
   form.show(player).then((res) => {
     if (!res) return;
@@ -2832,7 +2807,6 @@ export function showVictoryMessage(winnerTeamId, uhcTick = 0) {
 //  Get Player by Team (รับข้อมูลผู้เล่นตามทีม)
 // ======================================================
 const getPlayersByTeamBuf = [];
-
 export function getPlayersByTeam(teamId) {
   if (!TEAM_LOOKUP.has(teamId)) return getPlayersByTeamBuf;
 
@@ -3089,7 +3063,7 @@ function clearAllCaches() {
   const before = checkAllCaches();
   playerTeamCache.clear();
 
-  // --- ล้างแคชขณะรันไทม์ ---
+  // ล้างแคชขณะรันไทม์
   playerCache.clear();
   uhcPlayerIds.clear();
   allPlayersCache.length = 0;
@@ -3097,7 +3071,7 @@ function clearAllCaches() {
   allPlayersCacheIds.clear();
   clearTeamRuntimeState();
 
-  // --- ล้างแคชสถานะเกม ---
+  // ล้างแคชสถานะเกม
   deathLocation.clear();
   multiKill.clear();
   killStreak.clear();
@@ -3122,7 +3096,7 @@ function clearAllCachesIncludingStats() {
   const before = checkAllCaches();
   playerTeamCache.clear();
 
-  // --- ล้างแคชทั้งหมด ---
+  // ล้างแคชทั้งหมด
   playerCache.clear();
   uhcPlayerIds.clear();
   allPlayersCache.length = 0;
@@ -3134,14 +3108,14 @@ function clearAllCachesIncludingStats() {
   killStreak.clear();
   hitRegistry.clear();
 
-  // --- Clear stats ---
+  // Clear stats
   const teamsLen = TEAMS.length;
   for (let i = 0; i < teamsLen; i++) {
     teamStats.set(TEAMS[i].id, { kills: 0, deaths: 0 });
   }
   playerStats.clear();
 
-  // --- Clear dynamic properties ---
+  // Clear dynamic properties
   world.setDynamicProperty("uhc_teamStats", undefined);
   world.setDynamicProperty("uhc_playerStats", undefined);
 

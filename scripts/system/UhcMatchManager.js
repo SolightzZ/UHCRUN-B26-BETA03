@@ -78,7 +78,6 @@ function getUhcPlayersCached() {
 // ==================================== teleport +  Queue ==================================================================
 // =========================================================================================================================
 
-// Finds a safe Y position for teleporting (หาความสูง (Y) ที่ปลอดภัย สำหรับวาร์ปผู้เล่น)
 const TELEPORT_CONFIG = Object.freeze({
   PRELOAD_Y: 200,
   PRELOAD_DELAY: 2,
@@ -91,13 +90,17 @@ const TELEPORT_CONFIG = Object.freeze({
   MAX_SPAWN_RADIUS: 490,
 });
 
+// ======================================================
+// ค้นหาตำแหน่ง Y ที่ปลอดภัยสำหรับการเทเลพอร์ต (หาความสูง (Y) ที่ปลอดภัย สำหรับวาร์ปผู้เล่น)
+// ======================================================
 function teleportManagerGetSafeY(dimension, x, z) {
   if (!Number.isFinite(x) || !Number.isFinite(z)) return TELEPORT_CONFIG.DEFAULT_Y;
   const key = `${x | 0},${z | 0}`;
   if (safeYCache.has(key)) return safeYCache.get(key);
   try {
     const block = dimension.getTopmostBlock({ x, z });
-    // getTopmostBlock คืน null ถ้า chunk ยังไม่โหลด → ใช้ DEFAULT_Y แต่ไม่ cache
+    // getTopmostBlock คืน null ถ้า chunk
+    // ยังไม่โหลด → ใช้ DEFAULT_Y แต่ไม่ cache
     // เพื่อให้ phase 2 ลอง query ใหม่ได้อีกครั้ง
     if (!block) return TELEPORT_CONFIG.DEFAULT_Y;
     const y = Math.max(TELEPORT_CONFIG.MIN_Y, Math.min(TELEPORT_CONFIG.MAX_Y, block.y + 1));
@@ -210,11 +213,11 @@ function teleportPlayer(entry, dimension) {
     return { success: false, shouldRetry };
   }
 }
+
 // ======================================================
 // Player Teleport Queue - Main Function
 // ======================================================
 const teleportQueueAbortHandlers = [];
-
 function teleportManagerRunQueue(teamsData, positions, dimension) {
   let totalOk = 0;
   let totalFail = 0;
@@ -236,7 +239,7 @@ function teleportManagerRunQueue(teamsData, positions, dimension) {
     world.sendMessage(`[UHC] All teams teleported. ${MinecraftColor.gray}(Function OK: ${totalOk}${failMsg}${MinecraftColor.gray})`);
   }
 
-  // Phase 1: สร้างทีมที่ถูกต้องและเทเลพอร์ตผู้นำ
+  // * Phase 1: สร้างทีมที่ถูกต้องและเทเลพอร์ตผู้นำ
   const validTeams = [];
 
   for (let i = 0; i < teamsData.length; i++) {
@@ -254,7 +257,7 @@ function teleportManagerRunQueue(teamsData, positions, dimension) {
 
   if (!validTeams.length) return finishQueue();
 
-  // Phase 2: ดำเนินการคิวสมาชิกหลังจากหน่วงเวลา
+  // * Phase 2: ดำเนินการคิวสมาชิกหลังจากหน่วงเวลา
   system.runTimeout(() => {
     if (aborted) {
       removeAbortHandler();
@@ -328,7 +331,6 @@ function processMemberQueue(validTeams, dimension, finishCallback, onSuccess, on
     const currentNum = qIdx;
     const totalNum = memberQueue.length;
 
-    // แสดง [DEBUG] Player (num/num) ตามที่ขอ
     world.sendMessage(`${MinecraftColor.gray}[DEBUG] Player ${entry.player.name} (${currentNum}/${totalNum})`);
 
     const result = teleportPlayer(entry, dimension);
@@ -442,7 +444,7 @@ function playerSetupSpawnParticles(player) {
     explosionLocPool.y = particleY;
     explosionLocPool.z = z;
     player.dimension.spawnParticle("minecraft:huge_explosion_emitter", explosionLocPool);
-  } catch {}
+  } catch {} // @ts-ignore
 }
 
 // ======================================================
@@ -485,10 +487,10 @@ function playerSetupHandleGameStart(player, tick) {
       break;
   }
 }
+
 // ======================================================
 // Player Display GameStart
 // ======================================================
-
 const actionBar = 25;
 const actionNum = 5;
 const startBars = (() => {
@@ -617,7 +619,7 @@ function victoryManagerCheck() {
     if (!tag) continue;
 
     aliveTeamsSet.add(tag);
-    if (aliveTeamsSet.size > 1) return; // Early return when multiple teams alive
+    if (aliveTeamsSet.size > 1) return;
   }
 
   if (aliveTeamsSet.size === 1) {
@@ -686,7 +688,7 @@ function gameLoopHandleWorldStart(tick, players) {
 }
 
 // ======================================================
-// Main GameLoop Display
+//            Main GameLoop Display
 // ======================================================
 const CRITICAL_TICKS = new Set([1, 2, 4, 24, 26]);
 
@@ -706,7 +708,7 @@ function gameLoopPlayersTick(players) {
 }
 
 // ======================================================
-// Main GameLoop Event
+//              Main GameLoop Event
 // ======================================================
 
 function gameLoopWorld(uhcPlayers) {
@@ -718,7 +720,7 @@ function gameLoopWorld(uhcPlayers) {
 }
 
 // ======================================================
-// Main GameLoop System
+//                Main GameLoop System
 // ======================================================
 function gameLoopRun() {
   ctx.checkInterval = system.runInterval(() => {

@@ -20,18 +20,14 @@ system.beforeEvents.startup.subscribe(({ customCommandRegistry }) => {
             data.handler(source);
           } catch (error) {
             console.warn(`[Command Error] ${name}`, error);
-
-            // ส่ง feedback กลับผู้ใช้ เพื่อให้ Admin รู้ว่าคำสั่งพัง
             if (source?.isValid && typeof source.sendMessage === "function") {
-              source.sendMessage(
-                `§c[Command] §f${name} §cfailed: ${error?.message ?? error}`
-              );
+              source.sendMessage(`§c[Command] §f${name} §cfailed: ${error?.message ?? error}`);
             }
           }
         });
 
         return { status: CustomCommandStatus.Success };
-      }
+      },
     );
   }
 });

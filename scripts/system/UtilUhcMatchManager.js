@@ -34,7 +34,6 @@ export function playerSetupClearEffects(player) {
 // ======================================================
 // Player addEffect
 // ======================================================
-
 const effectOptionsHidden = { amplifier: 255, showParticles: false };
 export function playerSetupApplyEndState(player) {
   if (!player?.isValid) return;
@@ -48,9 +47,8 @@ export function playerSetupApplyEndState(player) {
 }
 
 // ======================================================
-// player Add Spectator is not tag uhc
+// ผู้เล่น Add Spectator ไม่ได้ติดแท็ก uhchc
 // ======================================================
-
 const UHC_PLAYER_EFFECTS = [
   ["regeneration", 520],
   ["blindness", 520],
@@ -91,7 +89,7 @@ export function playerSetupClearItemsKeepCompass(targetPlayer) {
 
     let foundCompass = false;
 
-    // clear inventory but keep 1 compass
+    // ล้างสินค้าคงคลังทั้งหมด แต่เก็บเข็มทิศไว้ 1 อัน
     for (let slot = 0; slot < inv.size; slot++) {
       const item = inv.getItem(slot);
       if (!item) continue;
@@ -120,7 +118,7 @@ export function playerSetupClearItemsKeepCompass(targetPlayer) {
     const equip = p.getComponent("minecraft:equippable");
     if (!equip) continue;
 
-    // clear all equipment=
+    // เคลียร์อุปกรณ์ทั้งหมด
     equip.setEquipment(EquipmentSlot.Offhand, undefined);
     equip.setEquipment(EquipmentSlot.Head, undefined);
     equip.setEquipment(EquipmentSlot.Chest, undefined);
