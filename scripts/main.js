@@ -35,6 +35,7 @@ import "./plugin/projectile_hit_sounds.js";
 import "./plugin/enchant.js";
 import "./plugin/fishing_hod.js";
 import "./plugin/axe.js";
+import "./plugin/ItemConsumeEffects.js";
 
 // System Games
 import "./system/border.js";

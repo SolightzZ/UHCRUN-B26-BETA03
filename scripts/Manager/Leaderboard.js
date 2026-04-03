@@ -14,7 +14,7 @@ import {
 } from "../Manager/TeamManager.js";
 
 const MAX_PLAYERS = 10;
-const MAX_TEAMS = 9;
+const MAX_TEAMS = 10;
 const RENDER_INTERVAL_TICKS = 100;
 
 const UI = Object.freeze({
@@ -146,13 +146,13 @@ function getPlayerText(statsMap) {
 }
 
 function buildEmptyTeamText() {
-  return `§bTop Team Kills\n\n§7None (0)\n`;
+  return `§bTop ${MAX_TEAMS} Teams (Kills)\n\n§7None (0)\n`;
 }
 
 function buildTeamText(list) {
   if (!list.length) return buildEmptyTeamText();
 
-  let text = `§bTop Team Kills\n\n`;
+  let text = `§bTop ${MAX_TEAMS} Teams (Kills)\n\n`;
   for (let i = 0; i < list.length; i++) {
     const color = getRankColor(i);
     const members = list[i].members ?? 0;
@@ -172,16 +172,20 @@ function getObjectiveTeamList(obj) {
     const score = scores[i];
     if (score.score <= 0) continue;
 
+    const displayName = score?.participant?.displayName;
+    if (!displayName) continue;
+
     let matchedTeam = null;
     for (let j = 0; j < teams.length; j++) {
-      if (score.participant.displayName.includes(teams[j].name)) {
+      const label = `${teams[j].color}${teams[j].name}`;
+      if (displayName === label) {
         matchedTeam = teams[j];
         break;
       }
     }
 
     list.push({
-      name: score.participant.displayName,
+      name: displayName,
       kills: score.score,
       members: matchedTeam ? getPlayersByTeam(matchedTeam.id).length : 0,
       order: matchedTeam ? teams.findIndex((team) => team.id === matchedTeam.id) : Number.MAX_SAFE_INTEGER,
@@ -197,17 +201,20 @@ function getRuntimeTeamList() {
   const teams = getTeams();
   const tStats = getTeamStats();
   const list = [];
-  if (!teams?.length || !tStats?.size) return list;
+  if (!teams?.length) return list;
 
   for (let i = 0; i < teams.length; i++) {
     const team = teams[i];
-    const st = tStats.get(team.id);
+    const st = tStats?.size ? tStats.get(team.id) : null;
     const members = getPlayersByTeam(team.id).length;
-    if (!st?.kills && !st?.deaths && members <= 0) continue;
+    const kills = st?.kills ?? 0;
+    const deaths = st?.deaths ?? 0;
+
+    if (!kills && !deaths && members <= 0) continue;
 
     list.push({
       name: `${team.color}${team.name}`,
-      kills: st?.kills ?? 0,
+      kills,
       members,
       order: i,
     });

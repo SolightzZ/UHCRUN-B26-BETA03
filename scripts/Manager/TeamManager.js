@@ -825,7 +825,7 @@ function leaveTeam(player) {
 // ======================================================
 function getKillerDisplay(player) {
   const resolvedKiller = resolveKiller(player.id);
-  if (!resolvedKiller?.isValid) {
+  if (!resolvedKiller?.isValid || resolvedKiller.id === player.id) {
     return getEnvironmentDeath(player.id);
   }
 
@@ -842,9 +842,7 @@ function getKillerDisplay(player) {
 // Get Environment Death (คืนค่าประเภทการตายจาก environment)
 // ======================================================
 function getEnvironmentDeath(playerId) {
-  const entry = hitRegistry.get(playerId);
-  if (!entry) return playerCache.get(playerId)?.name ?? playerId;
-  switch (entry.cause) {
+  switch (resolveDeathCause(playerId)) {
     case "fall":
       return "fall damage";
     case "lava":
@@ -860,20 +858,48 @@ function getEnvironmentDeath(playerId) {
       return "explosion";
     case "projectile":
       return "shot";
+    case "entityAttack":
+    case "entity_attack":
+      return "mob attack";
+    case "self":
+      return "self-inflicted damage";
+    case "player":
+      return "player attack";
+    case "environment":
+      return "environment";
     default:
-      return playerCache.get(playerId)?.name ?? playerId;
+      return "died";
   }
 }
 
 // ======================================================
 // showDeathUI (แสดง title + sound ตอนผู้เล่นตาย)
 // ======================================================
-function showDeathUI(player, killerDisplay) {
+function getDeathDisplayInfo(player) {
+  const resolvedKiller = resolveKiller(player.id);
+  if (resolvedKiller?.isValid && resolvedKiller.id !== player.id) {
+    return {
+      isPlayerKill: true,
+      text: getKillerDisplay(player),
+    };
+  }
+
+  const cause = resolveDeathCause(player.id);
+  return {
+    isPlayerKill: false,
+    cause,
+    text: getEnvironmentDeath(player.id),
+  };
+}
+
+function showDeathUI(player, deathInfo) {
+  const subtitle = deathInfo?.isPlayerKill ? `§7Killed by ${deathInfo.text}` : `§7Cause: ${deathInfo?.text ?? "unknown"}`;
+
   player.onScreenDisplay.setTitle("§cYOU DIED", {
     fadeInDuration: 10,
     stayDuration: 80,
     fadeOutDuration: 100,
-    subtitle: `§7Killed by ${killerDisplay}`,
+    subtitle,
   });
   player.playSound("random.orb", {
     volume: 1,
@@ -884,14 +910,16 @@ function showDeathUI(player, killerDisplay) {
 // ======================================================
 // Send Death Message (ส่งข้อความ death + stats ให้ผู้เล่น)
 // ======================================================
-function sendDeathMessage(player, killerDisplay) {
+function sendDeathMessage(player, deathInfo) {
   const stats = playerStats.get(player.id) ?? { kills: 0, deaths: 0 };
+  const detailLine = deathInfo?.isPlayerKill ? `§eKilled by §r${deathInfo.text}` : `§eCause: §r${deathInfo?.text ?? "unknown"}`;
+
   player.sendMessage(
     `\n` +
       `§7==========================\n` +
       `§c            YOU DIED\n` +
       `§7==========================\n\n` +
-      `§eKilled by §r${killerDisplay}\n\n` +
+      `${detailLine}\n\n` +
       `§eSTATS\n` +
       `§7 » Kills: §c${stats.kills}\n` +
       `§7 » Deaths: §c${stats.deaths}\n\n` +
@@ -917,9 +945,9 @@ function processDeathBatch() {
     if (!entry) break;
     const player = entry.player;
     if (!player?.isValid) continue;
-    const killerDisplay = getKillerDisplay(player);
-    showDeathUI(player, killerDisplay);
-    sendDeathMessage(player, killerDisplay);
+    const deathInfo = getDeathDisplayInfo(player);
+    showDeathUI(player, deathInfo);
+    sendDeathMessage(player, deathInfo);
     count++;
   }
 
@@ -1356,9 +1384,9 @@ function trackHit(attacker, victim, cause) {
   if (!victim) return;
   const victimId = victim.id;
   if (!victimId) return;
-  if (attacker === victim) return;
 
   const attackerId = attacker?.id;
+  const isSelfInflicted = !!attackerId && attackerId === victimId;
 
   let finalCause = cause;
   if (!finalCause) {
@@ -1370,15 +1398,30 @@ function trackHit(attacker, victim, cause) {
 
   if (!existing) {
     hitRegistry.set(victimId, {
-      attackerId: attackerId,
+      attackerId: isSelfInflicted ? null : attackerId,
       cause: finalCause,
+      damageType: finalCause,
       tick: currentTick,
+      isSelfInflicted,
     });
     return;
   }
 
-  existing.attackerId = attackerId;
+  const existingHasRecentPlayerAttacker = !!existing.attackerId && currentTick - existing.tick <= HIT_TIMEOUT_TICKS;
+
+  if (isSelfInflicted) {
+    if (!existingHasRecentPlayerAttacker) {
+      existing.attackerId = null;
+      existing.isSelfInflicted = true;
+    }
+  } else if (attackerId || !existingHasRecentPlayerAttacker) {
+    existing.attackerId = attackerId;
+    existing.isSelfInflicted = false;
+  } else {
+    existing.isSelfInflicted = false;
+  }
   existing.cause = finalCause;
+  existing.damageType = finalCause;
   existing.tick = currentTick;
 }
 
@@ -1398,19 +1441,37 @@ system.runInterval(() => {
 // ======================================================
 //  Resolve Killer (หา attacker ล่าสุดของ victim)
 // ======================================================
-function resolveKiller(victimId) {
+function getRecentHitEntry(victimId) {
   if (!victimId) return null;
   const entry = hitRegistry.get(victimId);
   if (!entry) return null;
+
   const currentTick = system.currentTick;
   if (currentTick - entry.tick > HIT_TIMEOUT_TICKS) {
     hitRegistry.delete(victimId);
     return null;
   }
+
+  return entry;
+}
+
+function resolveKiller(victimId) {
+  const entry = getRecentHitEntry(victimId);
+  if (!entry?.attackerId) return null;
+
   const killer = playerCache.get(entry.attackerId);
   if (!killer) return null;
   if (!killer.isValid) return null;
   return killer;
+}
+
+function resolveDeathCause(victimId) {
+  const entry = getRecentHitEntry(victimId);
+  if (!entry) return "environment";
+
+  if (entry.isSelfInflicted) return "self";
+  if (!entry.attackerId) return entry.damageType ?? entry.cause ?? "environment";
+  return "player";
 }
 
 // ======================================================
@@ -1457,6 +1518,7 @@ function handleMultiKill(killer) {
   if (!info) return;
   const message = info.text + " §7| §f" + killer.name;
   world.sendMessage(dynamicToast(message, "textures/ui/icons/icon_multiplayer"));
+  world.sendMessage(message);
   killer.playSound(info.sound);
 }
 
@@ -1487,6 +1549,7 @@ function handleFirstBlood(killer, victim) {
   firstBloodDone = true;
   const message = "§cFIRST BLOOD §7| " + killer.name + " > §f" + victim.name;
   world.sendMessage(dynamicToast(message, "textures/ui/friend_glyph_desaturated"));
+  world.sendMessage(message);
   killer.playSound("mob.wither.death");
 }
 
@@ -1526,7 +1589,7 @@ function drainItemVacuumQueue() {
     try {
       job();
     } catch (error) {
-      console.warn("[VacuumQueue] job error:", error);
+      console.warn("[DrainItemVacuumQueue] job error:", error);
     }
     drainItemVacuumQueue();
   }, 3);
@@ -1596,7 +1659,7 @@ function processVictimDeath(player, victimTeamId, loc) {
         item.teleport(cartLoc, { dimension: dim });
       }
     });
-  }, 3);
+  }, 1);
 
   // player stats
   const victimPs = playerStats.get(id) ?? { kills: 0, deaths: 0 };
@@ -1714,6 +1777,7 @@ function handleDeath(player) {
   cancelReviveForPlayer(id);
   const victimTeamId = playerTeamCache.get(id);
   const killer = resolveKiller(id);
+  const cause = resolveDeathCause(id);
 
   // Victim
   if (isUHC(player)) {
@@ -1723,23 +1787,9 @@ function handleDeath(player) {
     showDeathScreenshot(player);
   }
 
-  // Killer
-  if (!killer) {
-    hitRegistry.delete(id);
-    return;
+  if (cause === "player" && killer && isUHC(killer) && killer !== player) {
+    processKillerRewards(killer, player, victimTeamId);
   }
-
-  if (!isUHC(killer)) {
-    hitRegistry.delete(id);
-    return;
-  }
-
-  if (killer === player) {
-    hitRegistry.delete(id);
-    return;
-  }
-
-  processKillerRewards(killer, player, victimTeamId);
 
   hitRegistry.delete(id);
 }
@@ -2192,6 +2242,8 @@ function showTeleportForm(player, isAdmin) {
 
   refreshPlayerCaches();
 
+  const mode = isAdmin ? { isAdmin: true, doTeleport: AdminTeleport } : { isAdmin: false, doTeleport: playerTeleport };
+
   const others = getOtherUhcPlayers(player.id);
   const form = new ActionFormData();
   form.title("Teleport Menu");
@@ -2222,7 +2274,7 @@ function showTeleportForm(player, isAdmin) {
     }
   }
 
-  if (isAdmin) {
+  if (mode.isAdmin) {
     form.button("Back");
     buttonMap.push({ type: "back" });
   }
@@ -2234,13 +2286,13 @@ function showTeleportForm(player, isAdmin) {
     if (!action) return;
     switch (action.type) {
       case "random":
-        teleportRandom(player, isAdmin);
+        teleportRandom(player, mode.isAdmin);
         break;
       case "all":
-        teleportShowAllPlayers(player, isAdmin);
+        teleportShowAllPlayers(player, mode);
         break;
       case "team":
-        teleportShowTeamPlayers(player, action.teamId, isAdmin);
+        teleportShowTeamPlayers(player, action.teamId, mode);
         break;
       case "back":
         AdminMenu(player);
@@ -2354,6 +2406,10 @@ export function tpa(player) {
   if (!player) return;
   if (!player.isValid) return;
   if (!isGameRunning) return;
+  if (player.hasTag(CONFIG.adminTag)) {
+    showTeleportForm(player, true);
+    return;
+  }
   if (player.hasTag(CONFIG.uhcTag)) {
     player.sendMessage("§c[x] คุณไม่สามารถใช้ TPA ได้ในขณะที่ยังเล่น UHCRUN!");
     return;
@@ -2641,7 +2697,7 @@ function AdminMenu(player) {
         clearTeams(player);
         break;
       case 3:
-        showTeleportForm(player);
+        showTeleportForm(player, true);
         break;
       case 4:
         Managements(player);
