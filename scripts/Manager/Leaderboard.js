@@ -502,7 +502,9 @@ function handleLeaderboardNpcInteract(ev) {
 
   if (!player || !player.isValid) return;
   if (!player.hasTag("admin")) {
-    player.onScreenDisplay.setActionBar("You don't have permission");
+    system.run(() => {
+      player.onScreenDisplay.setActionBar("You don't have permission");
+    });
     return;
   }
 
