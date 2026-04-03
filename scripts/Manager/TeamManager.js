@@ -16,11 +16,14 @@ let allPlayersCacheIds = new Set();
 // Alive Team Dirty Handler (callback เมื่อ team เปลี่ยน)
 let aliveTeamDirtyHandler = () => {};
 
-// // registerAliveTeamDirtyHandler (register callback)
+// registerAliveTeamDirtyHandler (register callback)
 export function registerAliveTeamDirtyHandler(handler) {
-  aliveTeamDirtyHandler = typeof handler === "function" ? handler : () => {};
+  if (typeof handler === "function") {
+    aliveTeamDirtyHandler = handler;
+  } else {
+    aliveTeamDirtyHandler = () => {};
+  }
 }
-
 // TEAM_LOOKUP (map id → team info)
 const TEAM_LOOKUP = new Map(TEAMS.map((t) => [t.id, t]));
 
