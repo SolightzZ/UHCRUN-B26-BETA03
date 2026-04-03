@@ -1,7 +1,9 @@
-import { world, system, DisplaySlotId, GameMode } from "@minecraft/server";
+import { world, system, DisplaySlotId, GameMode, ItemStack } from "@minecraft/server";
 import { ActionFormData } from "@minecraft/server-ui";
 // @ts-ignore
 import { dynamicToast } from "../plugin/Util.js";
+// @ts-ignore
+import { playerSetupClearItemsKeepCompass } from "../system/UtilUhcMatchManager.js";
 
 //@ts-ignore
 import { TEAMS, CONFIG } from "./UtilTeamManaer.js";
@@ -80,12 +82,21 @@ const playerStats = new Map();
 // { playerId -> { x, y, z } }
 const deathLocation = new Map();
 const teamsLen = TEAMS.length;
+const REVIVE_ITEM_ID = "minecraft:player_head";
+const REVIVE_DURATION_TICKS = 30 * 20;
+const REVIVE_COOLDOWN_TICKS = 30 * 20;
+const REVIVE_CANCEL_MOVE_DISTANCE = 1;
+const REVIVE_ACTIONBAR_INTERVAL = 10;
 
 const playerTeamCache = createCacheProxy("teamId");
 const hitRegistry = createCacheProxy("hit");
 const multiKill = createCacheProxy("multiKill");
 const killStreak = createCacheProxy("killStreak");
 const playerCache = createCacheProxy("playerRef");
+const reviveSessions = new Map();
+const reviverSessions = new Map();
+const reviverCooldown = new Map();
+let reviveIntervalId = null;
 
 // ======================================================
 // refreshScoreboardUI (force update sidebar ทั้งหมด)
@@ -164,6 +175,506 @@ function updateSidebar(teamId) {
   }, 1);
 }
 
+// ======================================================
+//                  Revive System
+// ======================================================
+// getPlayerById (ดึง player จาก id พร้อม cache เพื่อลด cost ของ world.getPlayers)
+// ======================================================
+function getPlayerById(id) {
+  if (!id) return null;
+  const cached = playerCache.get(id);
+  if (cached?.isValid) return cached;
+
+  const players = world.getPlayers();
+  for (let i = 0; i < players.length; i++) {
+    const player = players[i];
+    if (!player?.isValid) continue;
+    playerCache.set(player.id, player);
+    if (player.id === id) return player;
+  }
+
+  return null;
+}
+
+// ======================================================
+// isPlayerDead (เช็คว่า player ตายอยู่หรือไม่ โดยดูจาก deathLocation)
+// ======================================================
+function isPlayerDead(id) {
+  return !!id && deathLocation.has(id);
+}
+
+// ======================================================
+// getRemainingReviveCooldown (คำนวณ cooldown ที่เหลือของผู้เล่น)
+// ======================================================
+function getRemainingReviveCooldown(playerId) {
+  if (!playerId) return 0;
+  const endTick = reviverCooldown.get(playerId) ?? 0;
+  const remaining = endTick - system.currentTick;
+  return remaining > 0 ? remaining : 0;
+}
+
+// ======================================================
+// clearExpiredReviveCooldown (ลบ cooldown ถ้าหมดแล้ว)
+// ======================================================
+function clearExpiredReviveCooldown(playerId) {
+  if (!playerId) return;
+  if (getRemainingReviveCooldown(playerId) > 0) return;
+  reviverCooldown.delete(playerId);
+}
+
+// ======================================================
+// getDeadPlayersInTeam (ดึงรายชื่อ teammate ที่ตายทั้งหมด)
+// ======================================================
+function getDeadPlayersInTeam(player) {
+  const deadPlayers = [];
+  if (!player?.isValid) return deadPlayers;
+
+  const teamId = getPlayerTeam(player);
+  if (!teamId) return deadPlayers;
+
+  const players = getCachedPlayers();
+  for (let i = 0; i < players.length; i++) {
+    const target = players[i];
+    if (!target?.isValid) continue;
+    if (target.id === player.id) continue;
+    if (!isPlayerDead(target.id)) continue;
+    if (getPlayerTeam(target) !== teamId) continue;
+    deadPlayers.push(target);
+  }
+
+  deadPlayers.sort((a, b) => a.name.localeCompare(b.name));
+  return deadPlayers;
+}
+
+// ======================================================
+// getDeathLocation (ดึงตำแหน่งที่ player ตาย)
+// ======================================================
+function getDeathLocation(id) {
+  return id ? (deathLocation.get(id) ?? null) : null;
+}
+
+// ======================================================
+// getPlayerInventoryContainer (ดึง inventory container ของ player)
+// ======================================================
+function getPlayerInventoryContainer(player) {
+  if (!player?.isValid) return null;
+  return player.getComponent("minecraft:inventory")?.container ?? null;
+}
+
+// ======================================================
+// hasReviveItem (เช็คว่าผู้เล่นมีไอเทม revive ใน hotbar หรือไม่)
+// ======================================================
+function hasReviveItem(player) {
+  const container = getPlayerInventoryContainer(player);
+  if (!container) return false;
+
+  const maxSlot = Math.min(9, container.size);
+  for (let slot = 0; slot < maxSlot; slot++) {
+    const item = container.getItem(slot);
+    if (!item) continue;
+    if (item.typeId !== REVIVE_ITEM_ID) continue;
+    if ((item.amount ?? 0) <= 0) continue;
+    return true;
+  }
+
+  return false;
+}
+
+// ======================================================
+// removeOneReviveItem (ลบไอเทม revive 1 ชิ้นจาก hotbar)
+// ======================================================
+function removeOneReviveItem(player) {
+  const container = getPlayerInventoryContainer(player);
+  if (!container) return false;
+
+  const maxSlot = Math.min(9, container.size);
+  for (let slot = 0; slot < maxSlot; slot++) {
+    const item = container.getItem(slot);
+    if (!item) continue;
+    if (item.typeId !== REVIVE_ITEM_ID) continue;
+
+    const amount = item.amount ?? 0;
+    if (amount <= 0) continue;
+
+    if (amount === 1) {
+      container.setItem(slot, undefined);
+    } else {
+      item.amount = amount - 1;
+      container.setItem(slot, item);
+    }
+    return true;
+  }
+
+  return false;
+}
+
+// ======================================================
+// isSameTeam (เช็คว่าผู้เล่น 2 คนอยู่ทีมเดียวกัน)
+// ======================================================
+function isSameTeam(playerA, playerB) {
+  if (!playerA?.isValid || !playerB?.isValid) return false;
+  const teamA = getPlayerTeam(playerA);
+  const teamB = getPlayerTeam(playerB);
+  return !!teamA && teamA === teamB;
+}
+
+// ======================================================
+// sendReviveTeamActionBar (ส่งข้อความ ActionBar ให้ทั้งทีม)
+// ======================================================
+function sendReviveTeamActionBar(teamId, message) {
+  if (!teamId || !message) return;
+  const players = getCachedPlayers();
+  for (let i = 0; i < players.length; i++) {
+    const player = players[i];
+    if (!player?.isValid) continue;
+    if (getPlayerTeam(player) !== teamId) continue;
+    player.onScreenDisplay.setActionBar(message);
+  }
+}
+
+// ======================================================
+// stopReviveTickIfIdle (หยุด loop ถ้าไม่มี revive session)
+// ======================================================
+function stopReviveTickIfIdle() {
+  if (reviveSessions.size > 0) return;
+  if (reviveIntervalId === null) return;
+  system.clearRun(reviveIntervalId);
+  reviveIntervalId = null;
+}
+
+// ======================================================
+// cancelReviveSession (ยกเลิก revive พร้อมแจ้งเหตุผล)
+// ======================================================
+function cancelReviveSession(targetId, reason) {
+  const session = reviveSessions.get(targetId);
+  if (!session) return;
+
+  reviveSessions.delete(targetId);
+  reviverSessions.delete(session.reviverId);
+  stopReviveTickIfIdle();
+
+  if (!reason) return;
+
+  const reviver = getPlayerById(session.reviverId);
+  if (reviver?.isValid) {
+    reviver.sendMessage(dynamicToast(reason, "textures/ui/cancel"));
+    reviver.playSound("note.bassattack");
+  }
+
+  const target = getPlayerById(targetId);
+  if (target?.isValid) {
+    target.onScreenDisplay.setActionBar(reason);
+  }
+}
+
+// ======================================================
+// finishRevive (ทำ revive สำเร็จ + reset state + apply effect)
+// ======================================================
+function finishRevive(targetId) {
+  const session = reviveSessions.get(targetId);
+  if (!session) return;
+
+  const reviver = getPlayerById(session.reviverId);
+  const target = getPlayerById(targetId);
+  if (!reviver?.isValid || !target?.isValid) {
+    cancelReviveSession(targetId, "§cยกเลิกการชุบ");
+    return;
+  }
+
+  if (!removeOneReviveItem(reviver)) {
+    cancelReviveSession(targetId, "§cต้องใช้หัวผู้เล่น 1 ไอเทมในการชุบ");
+    return;
+  }
+
+  const teamId = getPlayerTeam(reviver);
+  reviveSessions.delete(targetId);
+  reviverSessions.delete(session.reviverId);
+  reviverCooldown.set(session.reviverId, system.currentTick + REVIVE_COOLDOWN_TICKS);
+  stopReviveTickIfIdle();
+
+  deathLocation.delete(targetId);
+
+  teleportLocPool.x = reviver.location.x;
+  teleportLocPool.y = reviver.location.y;
+  teleportLocPool.z = reviver.location.z;
+  target.teleport(teleportLocPool, { dimension: reviver.dimension });
+  target.setGameMode(GameMode.Survival);
+  target.addTag("uhc");
+  target.removeEffect("conduit_power");
+  target.addEffect("regeneration", 200, { amplifier: 2, showParticles: false });
+  target.addEffect("resistance", 100, { amplifier: 4, showParticles: false });
+
+  if (!uhcPlayerIds.has(targetId)) {
+    uhcPlayerIds.add(targetId);
+    uhcPlayersCache.push(target);
+  }
+
+  if (teamId) {
+    const before = teamCounts.get(teamId) ?? 0;
+    teamCounts.set(teamId, before + 1);
+    teamPlayerIndex.get(teamId)?.add(targetId);
+    updateSidebar(teamId);
+  }
+
+  const stats = playerStats.get(targetId);
+  if (stats) {
+    stats.teamId = teamId;
+    stats.name = target.name;
+    playerStats.set(targetId, stats);
+  }
+
+  aliveTeamDirtyHandler();
+  scheduleSaveStats();
+
+  const reviveMessage = `§a${reviver.name} revived ${target.name}`;
+  sendReviveTeamActionBar(teamId, reviveMessage);
+  world.sendMessage(dynamicToast(reviveMessage, "textures/ui/heart_new"));
+  reviver.playSound("random.levelup");
+  target.playSound("random.totem");
+}
+
+// ======================================================
+// updateRevives (loop หลักของระบบ revive ทำงานทุก tick)
+// ======================================================
+function updateRevives() {
+  if (reviveSessions.size === 0) {
+    stopReviveTickIfIdle();
+    return;
+  }
+
+  for (const [targetId, session] of reviveSessions) {
+    const reviver = getPlayerById(session.reviverId);
+    const target = getPlayerById(targetId);
+
+    if (!reviver?.isValid || !target?.isValid) {
+      cancelReviveSession(targetId, "§cยกเลิกการชุบ");
+      continue;
+    }
+
+    if (!reviver.hasTag("uhc")) {
+      cancelReviveSession(targetId, "§cผู้ชุบไม่ใช่ผู้เล่นที่ยังมีชีวิตแล้ว");
+      continue;
+    }
+
+    if (!hasReviveItem(reviver)) {
+      cancelReviveSession(targetId, "§cไม่มีไอเท็มสำหรับชุบ");
+      continue;
+    }
+
+    if (!isPlayerDead(targetId)) {
+      cancelReviveSession(targetId, "§cเป้าหมายไม่ได้อยู่ในสถานะตาย");
+      continue;
+    }
+
+    if (!isSameTeam(reviver, target)) {
+      cancelReviveSession(targetId, "§cไม่ได้อยู่ทีมเดียวกัน");
+      continue;
+    }
+
+    const targetDeathLoc = getDeathLocation(targetId);
+    if (!targetDeathLoc) {
+      cancelReviveSession(targetId, "§cไม่พบตำแหน่งที่ตาย");
+      continue;
+    }
+
+    if (reviver.dimension !== target.dimension) {
+      cancelReviveSession(targetId, "§cอยู่คนละมิติ");
+      continue;
+    }
+
+    const dx = reviver.location.x - session.anchorX;
+    const dy = reviver.location.y - session.anchorY;
+    const dz = reviver.location.z - session.anchorZ;
+
+    if (dx * dx + dy * dy + dz * dz > REVIVE_CANCEL_MOVE_DISTANCE * REVIVE_CANCEL_MOVE_DISTANCE) {
+      cancelReviveSession(targetId, "§cระยะห่างเกินกำหนด");
+      continue;
+    }
+
+    const remainingTicks = session.endTick - system.currentTick;
+    if (remainingTicks <= 0) {
+      finishRevive(targetId);
+      continue;
+    }
+
+    if (session.lastUiTick !== undefined && system.currentTick - session.lastUiTick < REVIVE_ACTIONBAR_INTERVAL) {
+      continue;
+    }
+
+    session.lastUiTick = system.currentTick;
+    const seconds = Math.ceil(remainingTicks / 20);
+
+    sendReviveTeamActionBar(session.teamId, `Reviving ${target.name} in ${seconds}s`);
+  }
+}
+
+// ======================================================
+// startReviveTick (เริ่ม loop updateRevives แบบ lazy)
+// ======================================================
+function startReviveTick() {
+  if (reviveIntervalId !== null) return;
+  reviveIntervalId = system.runInterval(updateRevives, 1);
+}
+
+// ======================================================
+// startRevive (สร้าง revive session ใหม่)
+// ======================================================
+function startRevive(reviver, target) {
+  if (!reviver?.isValid || !target?.isValid) return;
+
+  const teamId = getPlayerTeam(reviver);
+  if (!teamId) return;
+
+  reviveSessions.set(target.id, {
+    reviverId: reviver.id,
+    endTick: system.currentTick + REVIVE_DURATION_TICKS,
+    teamId,
+    lastUiTick: -REVIVE_ACTIONBAR_INTERVAL,
+    anchorX: reviver.location.x,
+    anchorY: reviver.location.y,
+    anchorZ: reviver.location.z,
+  });
+  reviverSessions.set(reviver.id, target.id);
+  startReviveTick();
+
+  const message = `§eกำลังชุบ ${target.name}`;
+  reviver.sendMessage(dynamicToast(message, "textures/ui/heart_new"));
+  sendReviveTeamActionBar(teamId, message);
+}
+
+// ======================================================
+// tryStartRevive (validation ก่อนเริ่ม revive)
+// ======================================================
+function tryStartRevive(reviver, target) {
+  if (!reviver?.isValid || !target?.isValid) return;
+
+  if (!isGameRunning) {
+    reviver.sendMessage(dynamicToast("§cสามารถชุบชีวิตได้เฉพาะระหว่างเกมเท่านั้น", "textures/ui/cancel"));
+    return;
+  }
+
+  if (!reviver.hasTag("uhc")) {
+    reviver.sendMessage(dynamicToast("§cเฉพาะผู้เล่น UHC ที่ยังมีชีวิตเท่านั้นที่ชุบได้", "textures/ui/cancel"));
+    return;
+  }
+
+  if (!isPlayerDead(target.id)) {
+    reviver.sendMessage(dynamicToast("§cเป้าหมายยังไม่ตาย", "textures/ui/cancel"));
+    return;
+  }
+
+  if (!isSameTeam(reviver, target)) {
+    reviver.sendMessage(dynamicToast("§cเป้าหมายไม่ใช่เพื่อนร่วมทีมของคุณ", "textures/ui/cancel"));
+    return;
+  }
+
+  if (reviveSessions.has(target.id)) {
+    reviver.sendMessage(dynamicToast("§cมีคนกำลังชุบเป้าหมายนี้อยู่แล้ว", "textures/ui/cancel"));
+    return;
+  }
+
+  if (reviverSessions.has(reviver.id)) {
+    reviver.sendMessage(dynamicToast("§cคุณกำลังชุบคนอื่นอยู่", "textures/ui/cancel"));
+    return;
+  }
+
+  clearExpiredReviveCooldown(reviver.id);
+  const remainingCooldown = getRemainingReviveCooldown(reviver.id);
+
+  if (remainingCooldown > 0) {
+    const seconds = Math.ceil(remainingCooldown / 20);
+    reviver.sendMessage(dynamicToast(`§cคูลดาวน์การชุบ: ${seconds} วินาที`, "textures/ui/cancel"));
+    return;
+  }
+
+  startRevive(reviver, target);
+}
+
+// ======================================================
+// openReviveUI (เปิด UI ให้เลือก teammate ที่ตาย)
+// ======================================================
+function openReviveUI(player, deadList) {
+  if (!player?.isValid) return;
+  const form = new ActionFormData();
+  form.title(CONFIG.title);
+  form.body("Revive Player");
+  form.body("Select dead teammate");
+
+  for (let i = 0; i < deadList.length; i++) {
+    form.button(deadList[i].name, "textures/ui/heart_new");
+  }
+
+  form.button("Back", "textures/ui/cancel");
+  form.show(player).then((res) => {
+    if (!res || res.canceled) return;
+    if (res.selection === deadList.length) return;
+    const target = deadList[res.selection];
+    if (!target?.isValid) return;
+    tryStartRevive(player, target);
+  });
+}
+
+// ======================================================
+// onUseReviveItem (entry point เมื่อผู้เล่นใช้ไอเทม)
+// ======================================================
+function onUseReviveItem(player) {
+  if (!player?.isValid) return;
+  if (!isGameRunning) return;
+  if (!player.hasTag("uhc")) return;
+  if (!hasReviveItem(player)) return;
+
+  clearExpiredReviveCooldown(player.id);
+  const remainingCooldown = getRemainingReviveCooldown(player.id);
+
+  if (remainingCooldown > 0) {
+    const seconds = Math.ceil(remainingCooldown / 20);
+    player.sendMessage(dynamicToast(`§cคูลดาวน์การชุบ: ${seconds} วินาที`, "textures/ui/cancel"));
+    player.playSound("note.bassattack");
+    return;
+  }
+
+  const deadList = getDeadPlayersInTeam(player);
+
+  if (deadList.length === 0) {
+    player.playSound("note.bassattack");
+    return;
+  }
+
+  openReviveUI(player, deadList);
+}
+
+// ======================================================
+// clearAllReviveRuntime (reset state ทั้งระบบ revive)
+// ======================================================
+function clearAllReviveRuntime() {
+  reviveSessions.clear();
+  reviverSessions.clear();
+  reviverCooldown.clear();
+  stopReviveTickIfIdle();
+}
+
+// ======================================================
+// cancelReviveForPlayer (ยกเลิก revive ที่เกี่ยวข้องกับ player คนนี้)
+// ======================================================
+function cancelReviveForPlayer(playerId) {
+  if (!playerId) return;
+
+  const targetId = reviverSessions.get(playerId);
+  if (targetId) {
+    cancelReviveSession(targetId, "§cRevive cancelled");
+  }
+
+  if (reviveSessions.has(playerId)) {
+    cancelReviveSession(playerId, "§cRevive cancelled");
+  }
+
+  reviverCooldown.delete(playerId);
+}
+
+// ======================================================
+//
+//                Team Systeam
+//
 // ======================================================
 // setTeam (กำหนดทีม + sync state ทั้งหมด)
 // ======================================================
@@ -332,7 +843,7 @@ function getKillerDisplay(player) {
 // ======================================================
 function getEnvironmentDeath(playerId) {
   const entry = hitRegistry.get(playerId);
-  if (!entry) return "the environment";
+  if (!entry) return playerCache.get(playerId)?.name ?? playerId;
   switch (entry.cause) {
     case "fall":
       return "fall damage";
@@ -350,7 +861,7 @@ function getEnvironmentDeath(playerId) {
     case "projectile":
       return "shot";
     default:
-      return "the environment";
+      return playerCache.get(playerId)?.name ?? playerId;
   }
 }
 
@@ -397,7 +908,6 @@ let deathBatchRunning = false;
 
 function processDeathBatch() {
   let count = 0;
-  let consoleBody = "";
   let dynamicBatch = 5;
   if (deathQueue.length > 20) {
     dynamicBatch = 10;
@@ -1064,9 +1574,9 @@ function processVictimDeath(player, victimTeamId, loc) {
 
     enqueueItemVacuum(() => {
       spawnEntityLocPool.x = snapX;
-      spawnEntityLocPool.y = snapY + 0.2;
+      spawnEntityLocPool.y = snapY + 1.5;
       spawnEntityLocPool.z = snapZ;
-
+      dim.spawnItem(new ItemStack("minecraft:player_head", 1), spawnEntityLocPool);
       const cart = dim.spawnEntity("minecraft:hopper_minecart", spawnEntityLocPool);
       if (!cart) return;
 
@@ -1086,7 +1596,7 @@ function processVictimDeath(player, victimTeamId, loc) {
         item.teleport(cartLoc, { dimension: dim });
       }
     });
-  }, 5);
+  }, 3);
 
   // player stats
   const victimPs = playerStats.get(id) ?? { kills: 0, deaths: 0 };
@@ -1201,6 +1711,7 @@ function onDeath(ev) {
 function handleDeath(player) {
   if (!player || !player.isValid) return;
   const id = player.id;
+  cancelReviveForPlayer(id);
   const victimTeamId = playerTeamCache.get(id);
   const killer = resolveKiller(id);
 
@@ -1276,7 +1787,6 @@ function onSpawn(ev) {
       teleportLocPool.z = loc.z + 0.5;
 
       player.teleport(teleportLocPool, { dimension });
-      deathLocation.delete(id);
     }
   }
 
@@ -1288,6 +1798,12 @@ function onSpawn(ev) {
     player.setGameMode(GameMode.Spectator);
     player.addEffect("conduit_power", 1, { amplifier: 255, showParticles: false });
     return;
+  }
+
+  if (ev.initialSpawn && !isGameRunning) {
+    teleportToSpawn(player);
+    player.setGameMode(GameMode.Adventure);
+    playerSetupClearItemsKeepCompass(player);
   }
 
   if (!dynamicTeam) return;
@@ -1311,6 +1827,7 @@ function onSpawn(ev) {
 function onLeave(ev) {
   const id = ev.playerId;
   if (!id) return;
+  cancelReviveForPlayer(id);
   const teamId = playerTeamCache.get(id);
   const isCounted = !isGameRunning || uhcPlayerIds.has(id);
   const countedTeamId = isCounted ? teamId : null;
@@ -2371,6 +2888,7 @@ export function clearAllTaguhcAndDynamicProperty(executor) {
   if (executor && !executor.hasTag(CONFIG.adminTag)) return;
 
   refreshPlayerCaches();
+  clearAllReviveRuntime();
 
   const players = allPlayersCache.length > 0 ? allPlayersCache : world.getPlayers(),
     pLen = players.length;
@@ -2438,6 +2956,7 @@ export function clearAllTaguhcAndDynamicProperty(executor) {
 export function clearAllTeams(executor) {
   if (executor && !executor.hasTag(CONFIG.adminTag)) return;
   refreshPlayerCaches();
+  clearAllReviveRuntime();
 
   const players = allPlayersCache.length > 0 ? allPlayersCache : world.getPlayers(),
     pLen = players.length,
@@ -2596,7 +3115,12 @@ world.afterEvents.itemUse.subscribe((ev) => {
   const { source, itemStack } = ev;
 
   if (!source?.isValid) return;
-  if (itemStack?.typeId !== "minecraft:compass") return;
+  const itemId = itemStack?.typeId;
+  if (itemId === REVIVE_ITEM_ID) {
+    system.run(() => onUseReviveItem(source));
+    return;
+  }
+  if (itemId !== "minecraft:compass") return;
 
   const isAdmin = source.hasTag(CONFIG.adminTag),
     isUhc = source.hasTag("uhc");

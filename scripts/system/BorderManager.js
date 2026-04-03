@@ -471,7 +471,7 @@ function borderManagerApplyShrink() {
   const restTime = borderManagerGetRestTime(target);
   ctx.nextShrinkTick = ctx.shrinkStartTick + ctx.shrinkDuration + restTime;
   broadcast(players, {
-    message: dynamicToast(`Border closing in to ${target}`, "textures/blocks/barrier"),
+    message: dynamicToast(`Border กำลังลดลง ${target}`, "textures/blocks/barrier"),
     sound: "world_noti",
   });
 }
@@ -483,7 +483,7 @@ function borderManagerBroadcastWarning() {
   const players = getUhcPlayers();
   if (!players.length) return;
   broadcast(players, {
-    message: dynamicToast("Border starts shrinking in 30 seconds", "textures/ui/ErrorGlyph_small_hover"),
+    message: dynamicToast("Border กำลังลดลงใน 30 วินาที", "textures/ui/ErrorGlyph_small_hover"),
     sound: "noti",
   });
 }
@@ -720,7 +720,7 @@ function endSequenceTick() {
   if (ctx.endSeqStartTick === -1) {
     ctx.endSeqStartTick = ctx.uhcTick;
     broadcast(getUhcPlayers(), {
-      message: dynamicToast("Border fully closed!", "textures/blocks/barrier"),
+      message: dynamicToast("Border ถึงวงสุดท้ายแล้ว!", "textures/blocks/barrier"),
       sound: "world_noti",
     });
     return;

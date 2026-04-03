@@ -1,4 +1,4 @@
-import { EquipmentSlot, GameMode, InputPermissionCategory, system, world } from "@minecraft/server";
+import { GameMode, InputPermissionCategory, system, world } from "@minecraft/server";
 
 // @ts-ignore
 import {
@@ -457,9 +457,9 @@ function victoryManagerCheck() {
 
 // Config PVP timing
 // uhcTick นับทีละ 1 ต่อ interval (1 interval = 20 game-ticks = 1 วินาที)
-// nextShrinkTick = 300 → PVP เปิดหลัง border เริ่มหด 20 วินาที (PVP_DELAY)
+// nextShrinkTick = 200 → PVP เปิดหลัง border เริ่มหด 20 วินาที (PVP_DELAY)
 const PVP_DELAY = 20; // วินาที
-const PVP_TICK = 400 + PVP_DELAY; // uhcTick ที่ pvp เปิด (420)
+const PVP_TICK = 200 + PVP_DELAY; // uhcTick ที่ pvp เปิด (220)
 const PVP_WARN = PVP_TICK - 20; // แจ้งก่อน 20 วินาที
 const PVP_CD3 = PVP_TICK - 3;
 const PVP_CD2 = PVP_TICK - 2;
@@ -482,21 +482,21 @@ function gameLoopHandleWorldStart(tick, players) {
       break;
     case PVP_WARN:
       broadcast({
-        message: dynamicToast(`PVP starts in ${MinecraftColor.red}${PVP_DELAY} ${MinecraftColor.white}seconds`, "textures/ui/icon_multiplayer"),
+        message: dynamicToast(`PVP starts in ${MinecraftColor.red}${PVP_DELAY} ${MinecraftColor.white}s`, "textures/ui/icon_multiplayer"),
         sound: "noti",
       });
       break;
     case PVP_CD3:
     case PVP_CD2:
       broadcast({
-        message: dynamicToast(`PVP in ${MinecraftColor.red}${PVP_TICK - tick}`, "textures/ui/strength_effect"),
+        message: dynamicToast(`PVP in ${MinecraftColor.red}${PVP_TICK - tick}`),
         sound: "note.pling",
       });
       break;
     case PVP_TICK:
       world.gameRules.pvp = true;
       broadcast({
-        message: dynamicToast("PVP enabled!!", "textures/ui/icon_steve"),
+        message: dynamicToast("PVP enabled!!", "textures/ui/strength_effect"),
         title: icons.Sword,
         subtitle: MinecraftColor.green + "PVP enabled!!",
         sound: "world_noti",
@@ -589,13 +589,12 @@ export function startGameUhc() {
 
   const players = world.getPlayers();
 
-  for (let i = 0; i < players.length; i++) {
-    playerSetupApplyStartState(players[i]);
-  }
-
   refreshPlayerCaches();
   gameLoopRun();
   playerSetupClearItemsKeepCompass();
+  for (let i = 0; i < players.length; i++) {
+    playerSetupApplyStartState(players[i]);
+  }
 }
 
 // ======================================================

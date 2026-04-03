@@ -138,9 +138,6 @@ function uhcSetup() {
   cmd("structure load uhc1 569 100 569");
   for (const [tickCmd] of TICKING_AREAS) cmd(tickCmd);
 
-  cmd("setworldspawn 596 125 622");
-  cmd("clearspawnpoint @a");
-
   world.gameRules.sendCommandFeedback = false;
   world.gameRules.commandBlockOutput = false;
   world.gameRules.naturalRegeneration = true;
@@ -156,13 +153,14 @@ function uhcSetup() {
   world.gameRules.locatorBar = false;
   world.setDifficulty(Difficulty.Peaceful);
 
+  cmd("clearspawnpoint @a");
+  cmd("setworldspawn 596 125 622");
+
   batch({ step: setup, budget: 1 });
 }
 
 function uhcReset() {
   world.sendMessage("[UHC] Reset complete.");
-  cmd("clearspawnpoint @a");
-  cmd("setworldspawn 595 126 624");
 
   resetGameUhc();
 
@@ -175,12 +173,14 @@ function uhcReset() {
   world.gameRules.pvp = false;
   world.setDifficulty(Difficulty.Peaceful);
 
+  cmd("clearspawnpoint @a");
+  cmd("setworldspawn 596 125 622");
+
   batch({ step: reset, budget: 1 });
 }
 
 function uhcStart() {
   cmd("daylock false");
-  cmd("setworldspawn 0 100 0");
 
   startGameUhc();
 
@@ -193,11 +193,13 @@ function uhcStart() {
   world.gameRules.pvp = false;
   world.setDifficulty(Difficulty.Normal);
   world.setTimeOfDay(22999);
+
+  cmd("clearspawnpoint @a");
+  cmd("setworldspawn 0 100 0");
 }
 
 function uhcEnd() {
   world.sendMessage("[UHC] The game is over.");
-  cmd("clearspawnpoint @a");
   cmd("effect @a clear");
 
   endGameUhc();
@@ -209,6 +211,8 @@ function uhcEnd() {
   world.gameRules.naturalRegeneration = true;
   world.setDifficulty(Difficulty.Peaceful);
 
+  cmd("clearspawnpoint @a");
+  cmd("setworldspawn 596 125 622");
   batch({ step: end, budget: 1 });
 }
 

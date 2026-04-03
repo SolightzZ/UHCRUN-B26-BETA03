@@ -34,6 +34,8 @@ export function playerSetupClearEffects(player) {
 // ======================================================
 // Player addEffect
 // ======================================================
+
+const effectOptionsHidden = { amplifier: 255, showParticles: false };
 export function playerSetupApplyEndState(player) {
   if (!player?.isValid) return;
   if (getPlayerTeam(player)) {
@@ -48,33 +50,35 @@ export function playerSetupApplyEndState(player) {
 // ======================================================
 // player Add Spectator is not tag uhc
 // ======================================================
+
 const UHC_PLAYER_EFFECTS = [
   ["regeneration", 520],
   ["blindness", 520],
   ["invisibility", 1200],
   ["resistance", 1200],
 ];
-const effectOptionsHidden = { amplifier: 255, showParticles: false };
 
 export function playerSetupApplyStartState(player) {
   if (!player?.isValid) return;
+
   if (getPlayerTeam(player)) {
     player.addTag("uhc");
     for (let i = 0; i < UHC_PLAYER_EFFECTS.length; i++) {
       const [effect, duration] = UHC_PLAYER_EFFECTS[i];
       player.addEffect(effect, duration, effectOptionsHidden);
+      player.addEffect("conduit_power", 9900, { amplifier: 0, showParticles: false });
     }
     return;
   }
   player.setGameMode(GameMode.Spectator);
-  player.addEffect("conduit_power", 1, effectOptionsHidden);
+  player.addEffect("conduit_power", 9999, { amplifier: 0, showParticles: false });
 }
 
 // ======================================================
 // Player add Compass all player
 // ======================================================
-export function playerSetupClearItemsKeepCompass() {
-  const players = world.getPlayers();
+export function playerSetupClearItemsKeepCompass(targetPlayer) {
+  const players = targetPlayer && targetPlayer.isValid ? [targetPlayer] : world.getPlayers();
   const total = players.length;
   if (total === 0) return;
 
@@ -106,6 +110,11 @@ export function playerSetupClearItemsKeepCompass() {
       }
 
       inv.setItem(slot, undefined);
+    }
+
+    // ถ้าไม่มี compass → ให้ 1 อัน
+    if (!foundCompass) {
+      inv.setItem(0, new ItemStack("minecraft:compass", 1));
     }
 
     const equip = p.getComponent("minecraft:equippable");

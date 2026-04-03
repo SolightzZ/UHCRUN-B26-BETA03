@@ -1,7 +1,17 @@
 import { world, system } from "@minecraft/server";
 
 // @ts-ignore
-import { getTeamStats, getTeamInfo, getTeamKillObjective, getPlayerStats, getPlayerName } from "../Manager/TeamManager.js";
+import {
+  getPlayerName,
+  getPlayerStats,
+  getKdHistoryObjective,
+  getPlayersByTeam,
+  getTeamInfo,
+  getTeamKillObjective,
+  getTeams,
+  getTeamStats,
+  refreshPlayerCaches,
+} from "../Manager/TeamManager.js";
 
 const MAX_PLAYERS = 10;
 const MAX_TEAMS = 9;
@@ -23,25 +33,16 @@ let lastRenderTick = 0;
 const leaderboardInteractQueue = [];
 let leaderboardInteractScheduled = false;
 
-// ======================================================
-// isAdmin (ตรวจสอบสิทธิ์ผู้ดูแลระบบ)
-// ======================================================
 function isAdmin(player) {
   if (!player?.isValid) return false;
   return player.hasTag("admin");
 }
 
-// ======================================================
-// Get Rank Color (เลือกสีของอันดับตาม index)
-// ======================================================
 function getRankColor(index) {
   if (index < UI.RANKS.length) return UI.RANKS[index];
   return UI.RANKS[3];
 }
 
-// ======================================================
-// Get Leaderboard Npc Tag (แปลง tag NPC สำหรับ leaderboard)
-// ======================================================
 function getLeaderboardNpcTag(entity) {
   if (!entity?.isValid) return "";
   if (entity.hasTag("lb_players")) return "lb_players";
@@ -50,102 +51,120 @@ function getLeaderboardNpcTag(entity) {
   return "";
 }
 
-// ======================================================
-// Is Leaderboard Npc (ตรวจสอบอันดับ NPC)
-// ======================================================
 function isLeaderboardNpc(entity) {
   if (!entity?.isValid) return false;
   return getLeaderboardNpcTag(entity) !== "";
 }
 
-// ======================================================
-// Get Stats (สร้างข้อมูลสถิติของผู้เล่น)
-// ======================================================
 function getStats() {
+  const objectiveStats = getObjectivePlayerStats();
+  if (objectiveStats.size) return objectiveStats;
+
   const raw = getPlayerStats();
   const map = new Map();
   if (!raw?.size) return map;
 
   for (const [id, st] of raw) {
-    const kills = st.kills;
-    const deaths = st.deaths;
+    const kills = st?.kills ?? 0;
+    const deaths = st?.deaths ?? 0;
     if (!kills && !deaths) continue;
 
-    let name = id;
-    const resolvedName = getPlayerName(id);
-    if (resolvedName) {
-      name = resolvedName;
-    }
+    const name = getPlayerName(id) ?? id;
+    const teamInfo = st?.teamId ? getTeamInfo(st.teamId) : null;
 
-    map.set(name, { kills, deaths });
+    map.set(name, {
+      kills,
+      deaths,
+      teamId: st?.teamId ?? null,
+      teamLabel: teamInfo ? `${teamInfo.color}${teamInfo.name}` : null,
+    });
   }
 
   return map;
 }
 
-// ======================================================
-// Build Empty Player Text (ข้อความผู้เล่นเมื่อไม่มีข้อมูล)
-// ======================================================
-function buildEmptyPlayerText() {
-  return `§eTop ${MAX_PLAYERS} Players (Kills)\n\n§7... data? ...\n`;
+function getObjectivePlayerStats() {
+  const obj = getKdHistoryObjective();
+  const map = new Map();
+  if (!obj) return map;
+
+  const scores = obj.getScores();
+  if (!scores?.length) return map;
+
+  for (let i = 0; i < scores.length; i++) {
+    const score = scores[i];
+    const value = score?.score ?? 0;
+    if (value <= 0) continue;
+
+    const key = score?.participant?.displayName;
+    if (!key) continue;
+
+    const parts = key.split(" | Victim : ");
+    if (parts.length !== 2) continue;
+
+    const killerName = parts[0].replace("Kill: ", "").trim();
+    const victimName = parts[1].trim();
+    if (!killerName || !victimName) continue;
+
+    const killerEntry = map.get(killerName) ?? { kills: 0, deaths: 0, teamId: null, teamLabel: null };
+    killerEntry.kills += value;
+    map.set(killerName, killerEntry);
+
+    const victimEntry = map.get(victimName) ?? { kills: 0, deaths: 0, teamId: null, teamLabel: null };
+    victimEntry.deaths += value;
+    map.set(victimName, victimEntry);
+  }
+
+  return map;
 }
 
-// ======================================================
-// Get Player Text (แสดงข้อความอันดับผู้เล่นตามจำนวนการฆ่า)
-// ======================================================
+function buildEmptyPlayerText() {
+  return `§eTop ${MAX_PLAYERS} Players (Kills)\n\n§7None (0)\n`;
+}
+
 function getPlayerText(statsMap) {
   const list = [];
 
   for (const [name, st] of statsMap) {
     if (!st.kills && !st.deaths) continue;
-
     list.push({ name, st });
-    list.sort((a, b) => b.st.kills - a.st.kills);
-
-    if (list.length > MAX_PLAYERS) {
-      list.length = MAX_PLAYERS;
-    }
   }
 
+  list.sort((a, b) => b.st.kills - a.st.kills || a.name.localeCompare(b.name));
+  if (list.length > MAX_PLAYERS) list.length = MAX_PLAYERS;
   if (!list.length) return buildEmptyPlayerText();
 
   let text = `§eTop ${MAX_PLAYERS} Players (Kills)\n\n`;
   for (let i = 0; i < list.length; i++) {
     const item = list[i];
     const color = getRankColor(i);
-    text += `${color}#${i + 1} §a${item.name} §f- §c${item.st.kills} Kills §8(§4${item.st.deaths} Deaths§8)\n`;
+    const teamSuffix = item.st.teamLabel ? ` §8[${item.st.teamLabel}§8]` : "";
+    text += `${color}#${i + 1} §a${item.name}${teamSuffix} §f- §c${item.st.kills} Kills §8(§4${item.st.deaths} Deaths§8)\n`;
   }
 
   return text;
 }
 
-// ======================================================
-// Build Empty Team Text (ข้อความทีมเมื่อไม่มีข้อมูล)
-// ======================================================
 function buildEmptyTeamText() {
-  return `§bTop Team Kills\n\n§7... data? ...\n`;
+  return `§bTop Team Kills\n\n§7None (0)\n`;
 }
 
-// ======================================================
-// Build Team Text (แสดงข้อความทีมจากรายการข้อมูล)
-// ======================================================
 function buildTeamText(list) {
   if (!list.length) return buildEmptyTeamText();
 
   let text = `§bTop Team Kills\n\n`;
   for (let i = 0; i < list.length; i++) {
     const color = getRankColor(i);
-    text += `${color}#${i + 1} ${list[i].name} §f: §c${list[i].kills} Kills\n`;
+    const members = list[i].members ?? 0;
+    text += `${color}#${i + 1} ${list[i].name} §f: §c${list[i].kills} Kills §8(${members} Players)\n`;
   }
 
   return text;
 }
 
-// ======================================================
-// Get Objective Team List (สร้างรายการทีมจาก scoreboard)
-// ======================================================
 function getObjectiveTeamList(obj) {
   const scores = obj.getScores();
+  const teams = getTeams();
   const list = [];
   if (!scores?.length) return list;
 
@@ -153,63 +172,62 @@ function getObjectiveTeamList(obj) {
     const score = scores[i];
     if (score.score <= 0) continue;
 
+    let matchedTeam = null;
+    for (let j = 0; j < teams.length; j++) {
+      if (score.participant.displayName.includes(teams[j].name)) {
+        matchedTeam = teams[j];
+        break;
+      }
+    }
+
     list.push({
       name: score.participant.displayName,
       kills: score.score,
+      members: matchedTeam ? getPlayersByTeam(matchedTeam.id).length : 0,
+      order: matchedTeam ? teams.findIndex((team) => team.id === matchedTeam.id) : Number.MAX_SAFE_INTEGER,
     });
   }
 
-  list.sort((a, b) => b.kills - a.kills);
-  if (list.length > MAX_TEAMS) {
-    list.length = MAX_TEAMS;
-  }
-
+  list.sort((a, b) => b.kills - a.kills || a.order - b.order);
+  if (list.length > MAX_TEAMS) list.length = MAX_TEAMS;
   return list;
 }
 
-// ======================================================
-// Get Runtime Team List (สร้างรายการทีมจากสถิติ runtime)
-// ======================================================
 function getRuntimeTeamList() {
+  const teams = getTeams();
   const tStats = getTeamStats();
   const list = [];
-  if (!tStats?.size) return list;
+  if (!teams?.length || !tStats?.size) return list;
 
-  for (const [id, st] of tStats) {
-    if (!st.kills && !st.deaths) continue;
+  for (let i = 0; i < teams.length; i++) {
+    const team = teams[i];
+    const st = tStats.get(team.id);
+    const members = getPlayersByTeam(team.id).length;
+    if (!st?.kills && !st?.deaths && members <= 0) continue;
 
-    let name = `§f${id}`;
-    const info = getTeamInfo(id);
-    if (info) {
-      name = `${info.color}${info.name}`;
-    }
-
-    list.push({ name, kills: st.kills });
+    list.push({
+      name: `${team.color}${team.name}`,
+      kills: st?.kills ?? 0,
+      members,
+      order: i,
+    });
   }
 
-  list.sort((a, b) => b.kills - a.kills);
-  if (list.length > MAX_TEAMS) {
-    list.length = MAX_TEAMS;
-  }
-
+  list.sort((a, b) => b.kills - a.kills || a.order - b.order);
+  if (list.length > MAX_TEAMS) list.length = MAX_TEAMS;
   return list;
 }
 
-// ======================================================
-// Get Team Text (แสดงข้อความอันดับทีมตามจำนวนการฆ่า)
-// ======================================================
 function getTeamText() {
   const obj = getTeamKillObjective();
   if (obj) {
-    return buildTeamText(getObjectiveTeamList(obj));
+    const objectiveList = getObjectiveTeamList(obj);
+    if (objectiveList.length) return buildTeamText(objectiveList);
   }
 
   return buildTeamText(getRuntimeTeamList());
 }
 
-// ======================================================
-// Get Deaths Text (แสดงข้อความผู้เล่นที่ตายมากที่สุด)
-// ======================================================
 function getDeathsText(statsMap) {
   let topName = "None";
   let max = 0;
@@ -223,9 +241,6 @@ function getDeathsText(statsMap) {
   return `§cTop Deaths: §7${topName} (${max})§r\n`;
 }
 
-// ======================================================
-// Collect Npcs By Tag (รวบรวม NPC leaderboard แยกตามกลุ่ม tag)
-// ======================================================
 function collectNpcsByTag(npcs) {
   const pNpcs = [];
   const tNpcs = [];
@@ -251,12 +266,11 @@ function collectNpcsByTag(npcs) {
   return { pNpcs, tNpcs, dNpcs };
 }
 
-// ======================================================
-// Collect Npcs By Tag (รวบรวม NPC leaderboard แยกตามกลุ่ม tag)
-// ======================================================
 export function renderBoard() {
   if (system.currentTick - lastRenderTick < RENDER_INTERVAL_TICKS) return;
   lastRenderTick = system.currentTick;
+
+  refreshPlayerCaches();
 
   const dim = world.getDimension("overworld");
 
@@ -264,7 +278,7 @@ export function renderBoard() {
   try {
     npcs = dim.getEntities({ type: "minecraft:npc" });
   } catch {
-    return; // @ts-ignore
+    return;
   }
 
   if (!npcs.length) return;
@@ -287,9 +301,6 @@ export function renderBoard() {
   }
 }
 
-// ======================================================
-// Update Npc Text (อัปเดตข้อความ NPC เมื่อมีการเปลี่ยนแปลงเท่านั้น)
-// ======================================================
 function updateNpcText(npcs, text) {
   for (let i = 0; i < npcs.length; i++) {
     const npc = npcs[i];
@@ -300,16 +311,10 @@ function updateNpcText(npcs, text) {
   }
 }
 
-// ======================================================
-// Spawn Leaderboard NPC (เกิดใหม่ NPC leaderboard ทั้งหมด)
-// ======================================================
 export function spawnLeaderboardNPC() {
   system.runTimeout(spawnLeaderboardNPCNow, 20);
 }
 
-// ======================================================
-// Spawn Leaderboard NPC Now (สร้าง NPC leaderboard ทันที)
-// ======================================================
 function spawnLeaderboardNPCNow() {
   const dim = world.getDimension("overworld");
 
@@ -336,9 +341,6 @@ function spawnLeaderboardNPCNow() {
   }
 }
 
-// ======================================================
-// Queue Leaderboard Interact (เพิ่มคิวสำหรับอัปเดตการโต้ตอบ leaderboard แบบเลื่อนเวลา)
-// ======================================================
 function queueLeaderboardInteract(player) {
   leaderboardInteractQueue.push(player);
   if (leaderboardInteractScheduled) return;
@@ -347,9 +349,6 @@ function queueLeaderboardInteract(player) {
   system.run(drainLeaderboardInteractQueue);
 }
 
-// ======================================================
-// Drain Leaderboard Interact Queue (ประมวลผลคิวอัปเดตการโต้ตอบแบบเลื่อนเวลา)
-// ======================================================
 function drainLeaderboardInteractQueue() {
   leaderboardInteractScheduled = false;
 
@@ -364,9 +363,6 @@ function drainLeaderboardInteractQueue() {
   }
 }
 
-// ======================================================
-// Drain Leaderboard Interact Queue (ประมวลผลคิวอัปเดตการโต้ตอบแบบเลื่อนเวลา)
-// ======================================================
 function handleLeaderboardNpcInteract(ev) {
   const target = ev.target;
   const player = ev.player;
