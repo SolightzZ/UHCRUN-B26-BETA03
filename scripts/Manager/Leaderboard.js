@@ -33,27 +33,23 @@ let lastRenderTick = 0;
 const leaderboardInteractQueue = [];
 let leaderboardInteractScheduled = false;
 
-function isAdmin(player) {
-  if (!player?.isValid) return false;
-  return player.hasTag("admin");
-}
-
 function getRankColor(index) {
-  if (index < UI.RANKS.length) return UI.RANKS[index];
-  return UI.RANKS[3];
+  if (index < UI.RANKS.length) {
+    return UI.RANKS[index];
+  } else {
+    return UI.RANKS[3];
+  }
 }
 
+// ตรวจสอบว่าเอนทิตีนั้นเป็น NPC ในลีดเดอร์บอร์ดหรือไม่ และส่งคืนแท็กของเอนทิตีนั้น
 function getLeaderboardNpcTag(entity) {
-  if (!entity?.isValid) return "";
+  if (!entity || !entity.isValid) return "";
+
   if (entity.hasTag("lb_players")) return "lb_players";
   if (entity.hasTag("lb_teams")) return "lb_teams";
   if (entity.hasTag("lb_deaths")) return "lb_deaths";
-  return "";
-}
 
-function isLeaderboardNpc(entity) {
-  if (!entity?.isValid) return false;
-  return getLeaderboardNpcTag(entity) !== "";
+  return "";
 }
 
 function getStats() {
@@ -62,25 +58,105 @@ function getStats() {
 
   const raw = getPlayerStats();
   const map = new Map();
-  if (!raw?.size) return map;
+  if (!raw || !raw.size) return map;
 
   for (const [id, st] of raw) {
-    const kills = st?.kills ?? 0;
-    const deaths = st?.deaths ?? 0;
+    let kills;
+    if (st && st.kills !== undefined) {
+      kills = st.kills;
+    } else {
+      kills = 0;
+    }
+
+    let deaths;
+    if (st && st.deaths !== undefined) {
+      deaths = st.deaths;
+    } else {
+      deaths = 0;
+    }
+
     if (!kills && !deaths) continue;
 
-    const name = getPlayerName(id) ?? id;
-    const teamInfo = st?.teamId ? getTeamInfo(st.teamId) : null;
+    let name;
+    if (getPlayerName(id)) {
+      name = getPlayerName(id);
+    } else {
+      name = id;
+    }
+
+    let teamInfo;
+    if (st && st.teamId) {
+      teamInfo = getTeamInfo(st.teamId);
+    } else {
+      teamInfo = null;
+    }
+
+    let teamId;
+    if (st && st.teamId !== undefined) {
+      teamId = st.teamId;
+    } else {
+      teamId = null;
+    }
+
+    let teamLabel;
+    if (teamInfo) {
+      teamLabel = `${teamInfo.color}${teamInfo.name}`;
+    } else {
+      teamLabel = null;
+    }
 
     map.set(name, {
       kills,
       deaths,
-      teamId: st?.teamId ?? null,
-      teamLabel: teamInfo ? `${teamInfo.color}${teamInfo.name}` : null,
+      teamId,
+      teamLabel,
     });
   }
 
   return map;
+}
+
+function processScoreEntry(score, map) {
+  let value;
+  if (score && score.score !== undefined) {
+    value = score.score;
+  } else {
+    value = 0;
+  }
+
+  if (value <= 0) return;
+
+  let key;
+  if (score && score.participant && score.participant.displayName) {
+    key = score.participant.displayName;
+  } else {
+    return;
+  }
+
+  const parts = key.split(" | Victim : ");
+  if (parts.length !== 2) return;
+
+  const killerName = parts[0].replace("Kill: ", "").trim();
+  const victimName = parts[1].trim();
+  if (!killerName || !victimName) return;
+
+  let killerEntry;
+  if (map.has(killerName)) {
+    killerEntry = map.get(killerName);
+  } else {
+    killerEntry = { kills: 0, deaths: 0, teamId: null, teamLabel: null };
+  }
+  killerEntry.kills += value;
+  map.set(killerName, killerEntry);
+
+  let victimEntry;
+  if (map.has(victimName)) {
+    victimEntry = map.get(victimName);
+  } else {
+    victimEntry = { kills: 0, deaths: 0, teamId: null, teamLabel: null };
+  }
+  victimEntry.deaths += value;
+  map.set(victimName, victimEntry);
 }
 
 function getObjectivePlayerStats() {
@@ -89,30 +165,10 @@ function getObjectivePlayerStats() {
   if (!obj) return map;
 
   const scores = obj.getScores();
-  if (!scores?.length) return map;
+  if (!scores || !scores.length) return map;
 
   for (let i = 0; i < scores.length; i++) {
-    const score = scores[i];
-    const value = score?.score ?? 0;
-    if (value <= 0) continue;
-
-    const key = score?.participant?.displayName;
-    if (!key) continue;
-
-    const parts = key.split(" | Victim : ");
-    if (parts.length !== 2) continue;
-
-    const killerName = parts[0].replace("Kill: ", "").trim();
-    const victimName = parts[1].trim();
-    if (!killerName || !victimName) continue;
-
-    const killerEntry = map.get(killerName) ?? { kills: 0, deaths: 0, teamId: null, teamLabel: null };
-    killerEntry.kills += value;
-    map.set(killerName, killerEntry);
-
-    const victimEntry = map.get(victimName) ?? { kills: 0, deaths: 0, teamId: null, teamLabel: null };
-    victimEntry.deaths += value;
-    map.set(victimName, victimEntry);
+    processScoreEntry(scores[i], map);
   }
 
   return map;
@@ -122,9 +178,11 @@ function buildEmptyPlayerText() {
   return `§eTop ${MAX_PLAYERS} Players (Kills)\n\n§7None (0)\n`;
 }
 
+// สร้างรายการผู้เล่นที่เรียงลำดับแล้วเพื่อแสดงผลในตารางคะแนน
 function getPlayerText(statsMap) {
   const list = [];
 
+  // สร้างรายชื่อผู้เล่นพร้อมจำนวนการสังหาร/การตาย
   for (const [name, st] of statsMap) {
     if (!st.kills && !st.deaths) continue;
     list.push({ name, st });
@@ -138,7 +196,14 @@ function getPlayerText(statsMap) {
   for (let i = 0; i < list.length; i++) {
     const item = list[i];
     const color = getRankColor(i);
-    const teamSuffix = item.st.teamLabel ? ` §8[${item.st.teamLabel}§8]` : "";
+
+    let teamSuffix;
+    if (item.st.teamLabel) {
+      teamSuffix = ` §8[${item.st.teamLabel}§8]`;
+    } else {
+      teamSuffix = "";
+    }
+
     text += `${color}#${i + 1} §a${item.name}${teamSuffix} §f- §c${item.st.kills} Kills §8(§4${item.st.deaths} Deaths§8)\n`;
   }
 
@@ -155,8 +220,15 @@ function buildTeamText(list) {
   let text = `§bTop ${MAX_TEAMS} Teams (Kills)\n\n`;
   for (let i = 0; i < list.length; i++) {
     const color = getRankColor(i);
-    const members = list[i].members ?? 0;
-    text += `${color}#${i + 1} ${list[i].name} §f: §c${list[i].kills} Kills §8(${members} Players)\n`;
+
+    let members;
+    if (list[i].members !== undefined) {
+      members = list[i].members;
+    } else {
+      members = 0;
+    }
+
+    text += `${color}#${i + 1} ${list[i].name} §f: §c${list[i].kills} Kills §7(${members} Players)\n`;
   }
 
   return text;
@@ -166,14 +238,25 @@ function getObjectiveTeamList(obj) {
   const scores = obj.getScores();
   const teams = getTeams();
   const list = [];
-  if (!scores?.length) return list;
+
+  console.warn("[DEBUG] getObjectiveTeamList - scores length:", scores ? scores.length : 0);
+
+  if (!scores || !scores.length) return list;
 
   for (let i = 0; i < scores.length; i++) {
     const score = scores[i];
-    if (score.score <= 0) continue;
+    let displayName;
+    if (score && score.participant && score.participant.displayName) {
+      displayName = score.participant.displayName;
+    } else {
+      continue;
+    }
 
-    const displayName = score?.participant?.displayName;
-    if (!displayName) continue;
+    const scoreValue = score.score;
+
+    console.warn(`[DEBUG] Score: "${displayName}" = ${scoreValue}`);
+
+    if (scoreValue <= 0) continue;
 
     let matchedTeam = null;
     for (let j = 0; j < teams.length; j++) {
@@ -184,13 +267,20 @@ function getObjectiveTeamList(obj) {
       }
     }
 
+    if (!matchedTeam) {
+      console.warn(`[DEBUG] No team matched for displayName: "${displayName}"`);
+      continue;
+    }
+
     list.push({
       name: displayName,
-      kills: score.score,
-      members: matchedTeam ? getPlayersByTeam(matchedTeam.id).length : 0,
-      order: matchedTeam ? teams.findIndex((team) => team.id === matchedTeam.id) : Number.MAX_SAFE_INTEGER,
+      kills: scoreValue,
+      members: getPlayersByTeam(matchedTeam.id).length,
+      order: teams.findIndex((team) => team.id === matchedTeam.id),
     });
   }
+
+  console.warn("[DEBUG] Final objective list:", list.length, list);
 
   list.sort((a, b) => b.kills - a.kills || a.order - b.order);
   if (list.length > MAX_TEAMS) list.length = MAX_TEAMS;
@@ -201,16 +291,26 @@ function getRuntimeTeamList() {
   const teams = getTeams();
   const tStats = getTeamStats();
   const list = [];
-  if (!teams?.length) return list;
+  if (!teams || !teams.length) return list;
 
   for (let i = 0; i < teams.length; i++) {
     const team = teams[i];
-    const st = tStats?.size ? tStats.get(team.id) : null;
-    const members = getPlayersByTeam(team.id).length;
-    const kills = st?.kills ?? 0;
-    const deaths = st?.deaths ?? 0;
 
-    if (!kills && !deaths && members <= 0) continue;
+    let st;
+    if (tStats && tStats.size) {
+      st = tStats.get(team.id);
+    } else {
+      st = null;
+    }
+
+    const members = getPlayersByTeam(team.id).length;
+
+    let kills;
+    if (st && st.kills !== undefined) {
+      kills = st.kills;
+    } else {
+      kills = 0;
+    }
 
     list.push({
       name: `${team.color}${team.name}`,
@@ -235,17 +335,38 @@ function getTeamText() {
   return buildTeamText(getRuntimeTeamList());
 }
 
+function buildEmptyDeathsText() {
+  return `§cTop ${MAX_PLAYERS} Deaths\n\n§7None (0)\n`;
+}
+
 function getDeathsText(statsMap) {
-  let topName = "None";
-  let max = 0;
+  const list = [];
 
   for (const [name, st] of statsMap) {
-    if (st.deaths <= max) continue;
-    max = st.deaths;
-    topName = name;
+    if (!st.deaths) continue;
+    list.push({ name, st });
   }
 
-  return `§cTop Deaths: §7${topName} (${max})§r\n`;
+  list.sort((a, b) => b.st.deaths - a.st.deaths || a.name.localeCompare(b.name));
+  if (list.length > MAX_PLAYERS) list.length = MAX_PLAYERS;
+  if (!list.length) return buildEmptyDeathsText();
+
+  let text = `§cTop ${MAX_PLAYERS} Deaths\n\n`;
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i];
+    const color = getRankColor(i);
+
+    let teamSuffix;
+    if (item.st.teamLabel) {
+      teamSuffix = ` §8[${item.st.teamLabel}§8]`;
+    } else {
+      teamSuffix = "";
+    }
+
+    text += `${color}#${i + 1} §a${item.name}${teamSuffix} §f- §4${item.st.deaths} Deaths §8(§c${item.st.kills} Kills§8)\n`;
+  }
+
+  return text;
 }
 
 function collectNpcsByTag(npcs) {
@@ -255,18 +376,15 @@ function collectNpcsByTag(npcs) {
 
   for (let i = 0; i < npcs.length; i++) {
     const npc = npcs[i];
-    if (!npc?.isValid) continue;
+    if (!npc || !npc.isValid) continue;
 
-    switch (getLeaderboardNpcTag(npc)) {
-      case "lb_players":
-        pNpcs.push(npc);
-        break;
-      case "lb_teams":
-        tNpcs.push(npc);
-        break;
-      case "lb_deaths":
-        dNpcs.push(npc);
-        break;
+    const tag = getLeaderboardNpcTag(npc);
+    if (tag === "lb_players") {
+      pNpcs.push(npc);
+    } else if (tag === "lb_teams") {
+      tNpcs.push(npc);
+    } else if (tag === "lb_deaths") {
+      dNpcs.push(npc);
     }
   }
 
@@ -311,7 +429,7 @@ export function renderBoard() {
 function updateNpcText(npcs, text) {
   for (let i = 0; i < npcs.length; i++) {
     const npc = npcs[i];
-    if (!npc?.isValid) continue;
+    if (!npc || !npc.isValid) continue;
     if (typeof npc.nameTag !== "string") continue;
     if (npc.nameTag === text) continue;
     npc.nameTag = text;
@@ -331,7 +449,7 @@ function spawnLeaderboardNPCNow() {
 
     for (let j = 0; j < existing.length; j++) {
       const npc = existing[j];
-      if (!npc?.isValid) continue;
+      if (!npc || !npc.isValid) continue;
       npc.remove();
     }
 
@@ -361,7 +479,7 @@ function drainLeaderboardInteractQueue() {
 
   while (leaderboardInteractQueue.length > 0) {
     const player = leaderboardInteractQueue.shift();
-    if (!player?.isValid) continue;
+    if (!player || !player.isValid) continue;
     if (!player.isSneaking) continue;
 
     renderBoard();
@@ -376,11 +494,14 @@ function handleLeaderboardNpcInteract(ev) {
 
   if (!target) return;
   if (target.typeId !== "minecraft:npc") return;
-  if (!isLeaderboardNpc(target)) return;
+
+  if (!target || !target.isValid) return;
+  if (getLeaderboardNpcTag(target) === "") return;
 
   ev.cancel = true;
 
-  if (!isAdmin(player)) {
+  if (!player || !player.isValid) return;
+  if (!player.hasTag("admin")) {
     player.onScreenDisplay.setActionBar("You don't have permission");
     return;
   }
