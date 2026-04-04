@@ -156,7 +156,7 @@ function uhcSetup() {
 
   cmd("clearspawnpoint @a");
   cmd("setworldspawn 596 125 622");
-
+  cmd("effect @a clear");
   batch({ step: setup, budget: 1 });
 
   spawnLeaderboardNPC();

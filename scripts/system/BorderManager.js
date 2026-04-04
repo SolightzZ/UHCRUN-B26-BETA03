@@ -67,16 +67,16 @@ export const borderEnd = CHECKPOINTS[CHECKPOINTS.length - 1];
 // ค่าคงที่สำหรับการเรนเดอร์ particle ของ border
 const BORDER_RENDER = Object.freeze({
   VIEW_DISTANCE: 35,
-  PARTICLE_Y: 100,
+  PARTICLE_Y: 70,
 });
 
 // ค่าคงที่สำหรับเสียงเตือน border
 const BORDER_WARNING = Object.freeze({
-  DANGER_DISTANCE: 25,     // ระยะที่เริ่มเตือน (blocks)
-  CRITICAL_DISTANCE: 15,   // ระยะวิกฤต (blocks)
-  OUTSIDE_DISTANCE: 5,     // ระยะนอก border ที่เตือน (blocks)
-  SOUND_COOLDOWN: 80,      // คูลดาวน์เสียง (ticks = 4 วินาที)
-  CHECK_INTERVAL: 10,      // ตรวจสอบทุก 10 ticks (0.5 วินาที)
+  DANGER_DISTANCE: 25, // ระยะที่เริ่มเตือน (blocks)
+  CRITICAL_DISTANCE: 15, // ระยะวิกฤต (blocks)
+  OUTSIDE_DISTANCE: 5, // ระยะนอก border ที่เตือน (blocks)
+  SOUND_COOLDOWN: 80, // คูลดาวน์เสียง (ticks = 4 วินาที)
+  CHECK_INTERVAL: 10, // ตรวจสอบทุก 10 ticks (0.5 วินาที)
 });
 
 // เก็บข้อมูลเสียงของแต่ละผู้เล่น
@@ -87,7 +87,7 @@ const WARNING_SOUNDS = Object.freeze({
   warning: { sound: "note.pling", volume: 0.4, pitch: 0.9 },
   critical: { sound: "note.pling", volume: 0.7, pitch: 1.3 },
   outside: { sound: "random.break", volume: 0.6, pitch: 1.8 },
-  danger: { sound: "mob.enderdragon.growl", volume: 0.3, pitch: 2.0 }
+  danger: { sound: "mob.enderdragon.growl", volume: 0.3, pitch: 2.0 },
 });
 
 // ชุดสีของ border แยกตามสถานะปกติและตอนกำลังหด
@@ -526,20 +526,20 @@ export function borderManagerTick() {
 // ======================================================
 function borderManagerGetPlayerWarningLevel(player) {
   if (!player?.isValid) return null;
-  
+
   const loc = player.location;
   if (!loc) return null;
-  
+
   const r = ctx.borderRadius;
   // ดึงค่า cx, cz จาก center แค่รอบเดียว (Micro-Optimization แทนที่จะเรียก center.x ทุกครั้ง)
   const cx = center.x;
   const cz = center.z;
-  
+
   // ใช้คณิตศาสตร์ Box-Chebyshev (สี่เหลี่ยมจัตุรัส) เพื่อเลี่ยง Math.sqrt ป้องกัน CPU พุ่ง
   const dx = Math.abs(loc.x - cx);
   const dz = Math.abs(loc.z - cz);
   const maxDistance = Math.max(dx, dz);
-  
+
   // หากอยู่นอก border
   if (maxDistance > r) {
     const outsideDistance = maxDistance - r;
@@ -548,16 +548,16 @@ function borderManagerGetPlayerWarningLevel(player) {
     }
     return null; // นอกเกินไปเบรคทิ้งเลย
   }
-  
+
   // หากอยู่ใน border - คำนวณระยะจากขอบ
   const distanceToEdge = r - maxDistance;
-  
+
   if (distanceToEdge <= BORDER_WARNING.CRITICAL_DISTANCE) {
     return { level: "critical", distance: distanceToEdge, isOutside: false };
   } else if (distanceToEdge <= BORDER_WARNING.DANGER_DISTANCE) {
     return { level: "warning", distance: distanceToEdge, isOutside: false };
   }
-  
+
   return null; // ปลอดภัย
 }
 
@@ -566,29 +566,29 @@ function borderManagerGetPlayerWarningLevel(player) {
 // ======================================================
 function borderManagerUpdatePlayerWarningData(playerId, warningInfo) {
   const currentTick = ctx.uhcTick;
-  
+
   if (!warningInfo) {
     // ผู้เล่นปลอดภัย - ลบข้อมูล
     playerWarningData.delete(playerId);
     return false;
   }
-  
+
   let playerData = playerWarningData.get(playerId);
   if (!playerData) {
     playerData = {
       lastSoundTick: 0,
       lastLevel: null,
-      consecutiveWarnings: 0
+      consecutiveWarnings: 0,
     };
     playerWarningData.set(playerId, playerData);
   }
-  
+
   const { level } = warningInfo;
   const timeSinceLastSound = currentTick - playerData.lastSoundTick;
-  
+
   // ตรวจสอบว่าควรเล่นเสียงหรือไม่
   let shouldPlaySound = false;
-  
+
   if (timeSinceLastSound >= BORDER_WARNING.SOUND_COOLDOWN) {
     // คูลดาวน์หมดแล้ว
     shouldPlaySound = true;
@@ -596,14 +596,14 @@ function borderManagerUpdatePlayerWarningData(playerId, warningInfo) {
     // เปลี่ยนระดับเตือน - เล่นเสียงทันที
     shouldPlaySound = true;
   }
-  
+
   if (shouldPlaySound) {
     playerData.lastSoundTick = currentTick;
     playerData.lastLevel = level;
     playerData.consecutiveWarnings++;
     return true;
   }
-  
+
   return false;
 }
 
@@ -612,17 +612,17 @@ function borderManagerUpdatePlayerWarningData(playerId, warningInfo) {
 // ======================================================
 function borderManagerPlayWarningSound(player, level) {
   if (!player?.isValid || !level) return;
-  
+
   const soundConfig = WARNING_SOUNDS[level];
   if (!soundConfig) return;
-  
+
   try {
     player.playSound(soundConfig.sound, {
       volume: soundConfig.volume,
-      pitch: soundConfig.pitch
+      pitch: soundConfig.pitch,
     });
   } catch (error) {
-    // เงียบๆ ไม่ log error เพื่อไม่ให้รบกวน
+    console.warn("orderManagerPlayWarningSound Error: " + error);
   }
 }
 
@@ -631,28 +631,28 @@ function borderManagerPlayWarningSound(player, level) {
 // ======================================================
 function borderManagerProcessWarningSounds(players) {
   if (!players?.length || ctx.uhcTick % BORDER_WARNING.CHECK_INTERVAL !== 0) return;
-  
+
   const playersToWarn = [];
-  
+
   // ประมวลผลผู้เล่นทั้งหมด
   for (let i = 0; i < players.length; i++) {
     const player = players[i];
     if (!player?.isValid) continue;
-    
+
     const warningInfo = borderManagerGetPlayerWarningLevel(player);
     const shouldPlaySound = borderManagerUpdatePlayerWarningData(player.id, warningInfo);
-    
+
     if (shouldPlaySound && warningInfo) {
       playersToWarn.push({ player, level: warningInfo.level });
     }
   }
-  
+
   // เล่นเสียงแบบ batch
   for (let i = 0; i < playersToWarn.length; i++) {
     const { player, level } = playersToWarn[i];
     borderManagerPlayWarningSound(player, level);
   }
-  
+
   // ล้างข้อมูลผู้เล่นที่ออกจากเกม
   borderManagerCleanupWarningData(players);
 }
@@ -662,7 +662,7 @@ function borderManagerProcessWarningSounds(players) {
 // ======================================================
 function borderManagerCleanupWarningData(activePlayers) {
   if (ctx.uhcTick % 200 !== 0) return; // ล้างทุก 10 วินาที
-  
+
   const activePlayerIds = new Set();
   for (let i = 0; i < activePlayers.length; i++) {
     const player = activePlayers[i];
@@ -670,7 +670,7 @@ function borderManagerCleanupWarningData(activePlayers) {
       activePlayerIds.add(player.id);
     }
   }
-  
+
   // ลบข้อมูลผู้เล่นที่ไม่ active
   for (const [playerId] of playerWarningData) {
     if (!activePlayerIds.has(playerId)) {
@@ -857,15 +857,15 @@ function particleRendererRenderSmall(dim) {
 // ======================================================
 export function particleRendererTick(players) {
   if (!ctx.isRunning || !ctx.borderReady || !ctx.wbBounds) return;
-  
+
   // ประมวลผลเสียงเตือนสำหรับผู้เล่นทั้งหมด
   borderManagerProcessWarningSounds(players);
-  
+
   // ตรวจสอบดาเมจสำหรับแต่ละผู้เล่น
   for (let i = 0; i < players.length; i++) {
     borderManagerApplyDamage(players[i]);
   }
-  
+
   if (ctx.uhcTick % 4 !== 0) return;
   particleRendererGroupByCell(players);
   if (!groupsLen) return;
