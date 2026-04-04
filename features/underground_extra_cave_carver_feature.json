@@ -7,29 +7,31 @@
 
     "fill_with": "minecraft:air",
 
-    "width_modifier": 0.0,
-    // คงเดิม (extra layer ปกติไม่ต้อง scale เยอะ)
+    "width_modifier": 0.08,
+    // ↓ ลดจาก 0.12
+    // ลด cost ต่อ tunnel (ช่วย performance)
 
-    "skip_carve_chance": 71,
-    // ↑ จาก 66 → 71
-    // ลดความถี่ ~5%
+    "skip_carve_chance": 38,
+    // ↓ จาก 48
+    // เพิ่ม density ชัดเจน (ถ้ำถี่ขึ้นมาก)
 
-    "y_scale": [0.05, 0.85],
-    // ↓ จาก [0.1, 0.9]
-    // ลดโอกาสขึ้นใกล้ผิวเล็กน้อย
+    "y_scale": [0.18, 0.98],
+    // ↑ ดันขึ้นเกือบสุด
+    // ทำให้ cave "ชนกันทุก layer"
 
-    "height_limit": 103,
-    // คงเดิม (ยัง block ชั้นบนอยู่แล้ว)
+    "height_limit": 96,
+    // ↓ จาก 110
+    // กันไม่ให้ carve สูงเกิน → ลด chunk update / lag
 
-    "horizontal_radius_multiplier": [0.65, 1.3],
-    // ↓ จาก [0.7, 1.4]
-    // แคบลงเล็กน้อย → ลด visibility
+    "horizontal_radius_multiplier": [0.6, 1.1],
+    // ↓ ลด range
+    // tunnel สั้นลง แต่จำนวนมากขึ้น
 
-    "vertical_radius_multiplier": [0.75, 1.2],
-    // ↓ จาก [0.8, 1.3]
-    // เตี้ยลงเล็กน้อย → ไม่ทะลุเยอะ
+    "vertical_radius_multiplier": [0.7, 1.0],
+    // ↓ ทำให้ถ้ำไม่สูง → ไม่เป็นโพรงใหญ่
 
-    "floor_level": [-1.0, -0.45]
-    // ↓ ปรับเล็กน้อย → พื้นลึกขึ้นนิดเดียว
+    "floor_level": [-1.0, -0.65]
+    // ↓ กดพื้นเพิ่ม
+    // ลดโอกาสเปิดทะลุ surface
   }
 }

@@ -6,14 +6,15 @@ const CONFIG = Object.freeze({
   xp: Object.freeze({
     smelt: [1, 4],
     coal: [1, 10],
+    copper: [1, 8],
     emerald: [1, 15],
     redstone: [1, 4],
   }),
   chance: Object.freeze({ absorption: 16, lapisBook: 12 }),
   redstone: Object.freeze({
     healAmount: 2,
-    absorptionDuration: 7200,
-    absorptionMinutes: 6,
+    absorptionDuration: 12000,
+    absorptionMinutes: 10,
   }),
   sounds: Object.freeze({ orb: "random.orb", level: "random.levelup" }),
   feedback: Object.freeze({
@@ -39,6 +40,8 @@ const BLOCK_ACTION_MAP = new Map([
   ["minecraft:gold_ore", ACTION.SMELT],
   ["minecraft:deepslate_gold_ore", ACTION.SMELT],
   ["minecraft:coal_ore", ACTION.SMELT_XP],
+  ["minecraft:copper_ore", ACTION.SMELT_XP],
+  ["minecraft:deepslate_copper_ore", ACTION.SMELT_XP],
   ["minecraft:emerald_ore", ACTION.SMELT_XP],
   ["minecraft:deepslate_emerald_ore", ACTION.SMELT_XP],
   ["minecraft:lapis_ore", ACTION.LAPIS],
@@ -125,6 +128,7 @@ const ITEM_TABLE = Object.freeze({
   "minecraft:flint": Object.freeze({ type: "special", handler: "flint" }),
   "minecraft:lapis_lazuli": Object.freeze({ type: "special", handler: "lapis" }),
   "minecraft:coal": Object.freeze({ type: "xp", range: CONFIG.xp.coal }),
+  "minecraft:raw_copper": Object.freeze({ type: "xp", range: CONFIG.xp.copper }),
   "minecraft:emerald": Object.freeze({ type: "xp", range: CONFIG.xp.emerald }),
   "minecraft:raw_iron": Object.freeze({ type: "smelt", result: "minecraft:iron_ingot", xp: CONFIG.xp.smelt }),
   "minecraft:raw_gold": Object.freeze({ type: "smelt", result: "minecraft:gold_ingot", xp: CONFIG.xp.smelt }),
@@ -241,19 +245,16 @@ function scheduleBatch(player, location, action, dimension) {
   }, 2);
 }
 
-// Precompute r2 เป็น module-level — ไม่คำนวณซ้ำทุก flushBatch
 const _r2 = CONFIG.scan.itemRadius ** 2;
 
 function flushBatch(jobs) {
   if (!jobs.length) return;
 
-  // Local state - no shared contention
   const claimed = new Set();
   const center = { x: 0, y: 0, z: 0 };
 
   const { dimension } = jobs[0];
 
-  // Fast-path: single job ไม่ต้องคำนวณ bounding box + sqrt เลย
   if (jobs.length === 1) {
     const job = jobs[0];
     if (!isValidEntity(job.player)) return;
@@ -263,25 +264,35 @@ function flushBatch(jobs) {
     let entities;
     try {
       entities = dimension.getEntities({ type: "minecraft:item", location: center, maxDistance: CONFIG.scan.itemRadius });
-    } catch { return; }
+    } catch {
+      return;
+    }
     if (!entities.length) return;
     claimed.clear();
-    let totalXp = 0, lapisTotal = 0, lapisPosition = job.location;
+    let totalXp = 0,
+      lapisTotal = 0,
+      lapisPosition = job.location;
     for (const entity of entities) {
       if (!isValidEntity(entity)) continue;
       claimed.add(entity.id);
       const result = processItem(entity, job.action, job.player, dimension);
       totalXp += result.xp;
-      if (result.lapis) { lapisTotal += result.lapis.total; lapisPosition = result.lapis.position; }
+      if (result.lapis) {
+        lapisTotal += result.lapis.total;
+        lapisPosition = result.lapis.position;
+      }
     }
     spawnLapisRewards(job.player, dimension, { total: lapisTotal, position: lapisPosition });
     addXp(job.player, totalXp);
     return;
   }
 
-  // Multi-job: คำนวณ bounding box + query ครั้งเดียว
-  let minX = Infinity, minY = Infinity, minZ = Infinity;
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  let minX = Infinity,
+    minY = Infinity,
+    minZ = Infinity;
+  let maxX = -Infinity,
+    maxY = -Infinity,
+    maxZ = -Infinity;
   for (const job of jobs) {
     const { x, y, z } = job.location;
     if (x < minX) minX = x;
@@ -295,7 +306,9 @@ function flushBatch(jobs) {
   center.x = (minX + maxX) / 2;
   center.y = (minY + maxY) / 2;
   center.z = (minZ + maxZ) / 2;
-  const hx = (maxX - minX) / 2, hy = (maxY - minY) / 2, hz = (maxZ - minZ) / 2;
+  const hx = (maxX - minX) / 2,
+    hy = (maxY - minY) / 2,
+    hz = (maxZ - minZ) / 2;
   const halfDiag = Math.sqrt(hx * hx + hy * hy + hz * hz) + CONFIG.scan.itemRadius;
 
   let allEntities;

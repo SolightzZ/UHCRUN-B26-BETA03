@@ -170,7 +170,7 @@ function reseedRandom() {
 
 // ======================================================
 //
-// Main Tick (เลูปหลักของระบบ เติมคิวหลัก คิว retry และงาน layered ในแต่ละ tick)
+// Main Tick (ลูปหลักของระบบ คิวหลัก คิวretry และงาน layered ในแต่ละ tick)
 //
 // ======================================================
 function mainTick() {
@@ -198,7 +198,10 @@ function mainTick() {
       for (let i = ACTIVE_LAYERED_TASKS.length - 1; i >= 0; i--) {
         const lt = ACTIVE_LAYERED_TASKS[i];
         if (lt.stopped || !lt.player?.isValid) {
-          ACTIVE_LAYERED_TASKS.splice(i, 1);
+          // Swap-and-pop
+          const lastIdx = ACTIVE_LAYERED_TASKS.length - 1;
+          if (i !== lastIdx) ACTIVE_LAYERED_TASKS[i] = ACTIVE_LAYERED_TASKS[lastIdx];
+          ACTIVE_LAYERED_TASKS.pop();
         }
       }
     }
@@ -410,7 +413,10 @@ function processLayeredTasks() {
   for (let i = ACTIVE_LAYERED_TASKS.length - 1; i >= 0; i--) {
     const lt = ACTIVE_LAYERED_TASKS[i];
     if (lt.stopped || !lt.player?.isValid) {
-      ACTIVE_LAYERED_TASKS.splice(i, 1);
+      // Swap-and-pop
+      const lastIdx = ACTIVE_LAYERED_TASKS.length - 1;
+      if (i !== lastIdx) ACTIVE_LAYERED_TASKS[i] = ACTIVE_LAYERED_TASKS[lastIdx];
+      ACTIVE_LAYERED_TASKS.pop();
       continue;
     }
 

@@ -1867,21 +1867,12 @@ function onLeave(ev) {
   const countedTeamId = isCounted ? teamId : null;
   removePlayerFromRuntimeState(id, countedTeamId, true);
 
-  // allPlayersCache
-  const idx1 = allPlayersCache.findIndex((p) => p.id === id);
-  if (idx1 !== -1) {
-    allPlayersCache[idx1] = allPlayersCache[allPlayersCache.length - 1];
-    allPlayersCache.pop();
-  }
-
+  // allPlayersCache (Swap-and-pop)
+  removeCachedPlayerById(allPlayersCache, id);
   allPlayersCacheIds.delete(id);
 
-  // uhcPlayersCache
-  const idx2 = uhcPlayersCache.findIndex((p) => p.id === id);
-  if (idx2 !== -1) {
-    uhcPlayersCache[idx2] = uhcPlayersCache[uhcPlayersCache.length - 1];
-    uhcPlayersCache.pop();
-  }
+  // uhcPlayersCache (Swap-and-pop)
+  removeCachedPlayerById(uhcPlayersCache, id);
 
   // cleanup
   if (itemVacuumQueue.length > 0) {
@@ -2628,6 +2619,154 @@ function viewTeamStats(admin) {
 }
 
 // ======================================================
+// Credits resource
+// ======================================================
+function Credits(player) {
+  const form = new ActionFormData();
+  form.title("UHCRun26 | Credits");
+
+  form.header("§eVersion");
+  form.label("§7UHCRUNB26BETA04");
+  form.divider();
+
+  form.header("§eDeveloper");
+  form.label("§7SolightzZ");
+  form.divider();
+
+  form.header("§eGame Design");
+  form.label("§7SolightzZ");
+  form.divider();
+
+  form.header("§eEngineering");
+  form.label("§7SolightzZ");
+  form.divider();
+
+  form.header("§eSound Design");
+  form.label("§7SolightzZ");
+  form.divider();
+
+  form.header("§eAbout");
+  form.label(
+    "§7• กระโดดเข้าสู่สนามเอาชีวิตรอด\n" + "§7• รวมทีม วางแผน และต่อสู้\n" + "§7• เอาชีวิตรอดให้ได้นานที่สุด\n" + "§7• จนเหลือทีมสุดท้ายที่ยืนหยัด",
+  );
+
+  form.header("§ePowered By");
+  form.label("§7Minecraft Bedrock Script API");
+
+  form.header("§eCredits");
+  form.label("§7World Border: §fmyGenGaming\n" + "§7Particles: §fRexoes\n" + "§7Lobby Build: §fOMEGA BLADE\n" + "§7Action Form: §fPablo");
+  form.divider();
+
+  form.label("             - Sleeplite SMP - ");
+  form.button("Back", "textures/uhc/solightzz");
+
+  form
+    .show(player)
+    .then((res) => {
+      if (!res || res.canceled) return;
+      openMainMenu(player);
+    })
+    .catch((err) => {
+      console.warn("[UI_ERROR] Credits form failed:", err);
+    });
+}
+// ======================================================
+// Features resource
+// ======================================================
+function Features(player) {
+  const form = new ActionFormData();
+  form.title("UHCRun26 | Features");
+
+  form.header("§eSurvival");
+  form.label(
+    "§7• Max Health: §f24 HP\n" +
+      "§7• No natural regeneration\n" +
+      "§7• Heal via §fGolden Apple §7& §fCooked Beef\n" +
+      "§7• Grave system (§f48 slots§7)",
+  );
+  form.divider();
+
+  form.header("§eOre");
+  form.label(
+    "§7• Iron (→ Iron Ingot + XP)\n" +
+      "§7• Gold (→ Gold Ingot + XP)\n" +
+      "§7• Coal (→ XP)\n" +
+      "§7• Copper (→ XP)\n" +
+      "§7• Emerald (→ XP)\n" +
+      "§7• Lapis (→ Lapis / Book)\n" +
+      "§7• Gravel (→ Arrow)\n" +
+      "§7• Redstone (→ Heal + XP)\n" +
+      "§7• Diamond (→ Sound)\n" +
+      "§7• Obsidian (→ Sound)\n",
+  );
+  form.divider();
+
+  form.header("§eCombat & PvP");
+  form.label(
+    "§7• PvP enabled after §f720 ticks (§712 minute§7)\n" +
+      "§7• Knockback system\n" +
+      "§7• Fishing rod mechanics\n" +
+      "§7• Bow hit sound + target name\n" +
+      "§7• CPS Limit: §f20 max\n" +
+      "§7• Kill & Death tracking",
+  );
+  form.divider();
+
+  form.header("§eWorld Border");
+  form.label("§7• Shrinks from §f500x500 → 2x2\n" + "§7• Damage outside border\n" + "§7• Optimized Overworld generation\n" + "§7• Void Nether & End");
+  form.divider();
+
+  form.header("§eResources");
+  form.label(
+    "§7• Auto Smelt (§fOre → Ingot + XP§7)\n" +
+      "§7• Auto Enchant tools\n" +
+      "§7• Food regeneration system\n" +
+      "§7• Tree Capitator + Apple drops\n" +
+      "§7• Auto TNT\n" +
+      "§7• Custom loot tables\n" +
+      "§7• Villager trading",
+  );
+  form.divider();
+
+  form.header("§eTeam & Revive");
+  form.label("§7• Team size: §f1–3 players\n" + "§7• Revive using player head (§f30s§7)\n" + "§7• Team chat & colored nametags");
+  form.divider();
+
+  form.header("§eUtilities");
+  form.label("§7• Scoreboard\n" + "§7• Interaction guard");
+  form.divider();
+
+  form.label("             - Sleeplite SMP - ");
+  form.button("Back", "textures/uhc/solightzz");
+  form
+    .show(player)
+    .then((res) => {
+      if (!res || res.canceled) return;
+      openMainMenu(player);
+    })
+    .catch((err) => {
+      console.warn("[UI_ERROR] Features form failed:", err);
+    });
+}
+
+function Ranks(player) {
+  const form = new ActionFormData();
+  form.title("UHCRun26 | Features");
+  form.header("Comming Soon");
+  form.label("             - Sleeplite SMP - ");
+  form.button("Back", "textures/uhc/solightzz");
+  form
+    .show(player)
+    .then((res) => {
+      if (!res || res.canceled) return;
+      openMainMenu(player);
+    })
+    .catch((err) => {
+      console.warn("[UI_ERROR] Features form failed:", err);
+    });
+}
+
+// ======================================================
 // View Death Locations (ดูสถานที่เสียชีวิต)
 // ======================================================
 function viewDeathLocations(admin) {
@@ -2648,7 +2787,8 @@ function viewDeathLocations(admin) {
 // ======================================================
 function AdminMenu(player) {
   const form = new ActionFormData();
-  form.title("§g§rAdmin");
+  form.title(CONFIG.title);
+  form.body("Admin");
   form.button("Player", "textures/ui/sidebar_icons/genre");
   form.button("Kill", "textures/ui/sidebar_icons/character_creator");
   form.button("Clear", "textures/ui/icon_trash");
@@ -2740,9 +2880,12 @@ function teleportToSpawn(player) {
 export function openMainMenu(player) {
   const form = new ActionFormData();
   form.title(CONFIG.title);
-  form.body("§6UHCRun");
-  form.button("Spawn", "textures/ui/icons/icon_summer");
+  form.body("§6UHCRUN26 §7(Mini Game Battle Royal)");
+  form.button("Spawn", "textures/ui/icons/icon_mashupworld");
   form.button("Team", "textures/ui/icons/icon_multiplayer");
+  form.button("Features", "textures/ui/creative_icon");
+  form.button("Credits", "textures/ui/icon_book_writable");
+  form.button("Ranks", "textures/ui/village_hero_effect");
 
   if (player.hasTag(CONFIG.adminTag)) {
     form.button("Admin", "textures/ui/Add-Ons_Side-Nav_Icon_24x24");
@@ -2758,6 +2901,15 @@ export function openMainMenu(player) {
         openTeamMenu(player);
         break;
       case 2:
+        Features(player);
+        break;
+      case 3:
+        Credits(player);
+        break;
+      case 4:
+        Ranks(player);
+        break;
+      case 5:
         if (player.hasTag(CONFIG.adminTag)) AdminMenu(player);
         break;
     }

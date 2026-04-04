@@ -129,10 +129,10 @@ const TICKING_AREAS = Object.freeze([
 
 function uhcSetup() {
   world.sendMessage(
-    "§7------- UHCRun Season 2 -------\n" +
-      "§f Official Competitive UHC Event\n" +
-      "§f Hosted by Sleeplite Server\n" +
-      "§9 Community: discord.gg/gtqfbmvTJK\n" +
+    "§7------------ UHCRun26 -----------\n" +
+      "§f Battle. Survive. Win.\n" +
+      "§f Presented by Sleeplite SMP\n" +
+      "§9Join the community > discord.gg/gtqfbmvTJK\n" +
       "§7------------------------------",
   );
 

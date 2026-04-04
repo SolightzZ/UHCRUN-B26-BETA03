@@ -54,6 +54,7 @@ const UHC_PLAYER_EFFECTS = [
   ["blindness", 520],
   ["invisibility", 1200],
   ["resistance", 1200],
+  ["night_vision", 99999],
 ];
 
 export function playerSetupApplyStartState(player) {
@@ -64,7 +65,7 @@ export function playerSetupApplyStartState(player) {
     for (let i = 0; i < UHC_PLAYER_EFFECTS.length; i++) {
       const [effect, duration] = UHC_PLAYER_EFFECTS[i];
       player.addEffect(effect, duration, effectOptionsHidden);
-      player.addEffect("conduit_power", 99099, { amplifier: 0, showParticles: false });
+      player.addEffect("conduit_power", 5000, { amplifier: 0, showParticles: false });
     }
     return;
   }

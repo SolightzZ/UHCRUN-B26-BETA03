@@ -61,6 +61,10 @@ const safeYCache = new Map();
 function getAllPlayersCached() {
   const players = getAllPlayers();
   if (players.length > 0) return players;
+
+  // ป้องกันเซิร์ฟเวอร์ Drain CPU ในกรณีที่ว่างเปล่า (ไม่มีผู้เล่นออนไลน์เลย)
+  if (world.getPlayers().length === 0) return players;
+
   refreshPlayerCaches();
   return getAllPlayers();
 }
@@ -71,6 +75,10 @@ function getAllPlayersCached() {
 function getUhcPlayersCached() {
   const players = getUhcPlayers();
   if (players.length > 0) return players;
+
+  // ป้องกันเซิร์ฟเวอร์ Drain CPU ในกรณีที่ว่างเปล่า (ไม่มีผู้เล่นออนไลน์เลย)
+  if (world.getPlayers().length === 0) return players;
+
   refreshPlayerCaches();
   return getUhcPlayers();
 }
@@ -236,43 +244,59 @@ function teleportManagerRunQueue(teamsData, positions, dimension) {
   function finishQueue() {
     removeAbortHandler();
     const failMsg = totalFail > 0 ? ` ${MinecraftColor.red}fail:${totalFail}` : "";
-    world.sendMessage(`[UHC] All teams teleported. ${MinecraftColor.gray}(Function OK: ${totalOk}${failMsg}${MinecraftColor.gray})`);
+    world.sendMessage(`[UHC] All teams teleported. ${MinecraftColor.gray}(Queue: ${totalOk}${failMsg}${MinecraftColor.gray})`);
   }
 
-  // * Phase 1: สร้างทีมที่ถูกต้องและเทเลพอร์ตผู้นำ
+  // * Phase 1: สร้างทีมที่ถูกต้องและรวบรวม
   const validTeams = [];
 
   for (let i = 0; i < teamsData.length; i++) {
     const validTeam = createValidTeam(teamsData[i], positions[i], dimension);
     if (!validTeam) continue;
+    validTeams.push(validTeam);
+  }
 
+  if (!validTeams.length) return finishQueue();
+
+  // * Phase 1.5: หน่วงเวลาเทเลพอร์ตผู้นำทีมละ 1 Tick ป้องกัน TPS Spike
+  let phase1Idx = 0;
+  function processNextLeader() {
+    if (aborted) {
+      removeAbortHandler();
+      return;
+    }
+
+    if (phase1Idx >= validTeams.length) {
+      // * Phase 2: ดำเนินการคิวสมาชิกหลังจากหน่วงเวลาให้ Leader โหลด Chunk
+      system.runTimeout(() => {
+        if (aborted) {
+          removeAbortHandler();
+          return;
+        }
+
+        processMemberQueue(
+          validTeams,
+          dimension,
+          finishQueue,
+          () => totalOk++,
+          () => totalFail++,
+          () => aborted,
+        );
+      }, TELEPORT_CONFIG.LEADER_SETTLE_TICKS);
+      return;
+    }
+
+    const validTeam = validTeams[phase1Idx++];
     const leader = validTeam.snapshot[0];
     const success = teleportLeaderToPreload(leader, validTeam.capturedX, validTeam.capturedZ, dimension, validTeam.teamTag);
 
     if (success) totalOk++;
     else totalFail++;
 
-    validTeams.push(validTeam);
+    system.runTimeout(processNextLeader, 1);
   }
 
-  if (!validTeams.length) return finishQueue();
-
-  // * Phase 2: ดำเนินการคิวสมาชิกหลังจากหน่วงเวลา
-  system.runTimeout(() => {
-    if (aborted) {
-      removeAbortHandler();
-      return;
-    }
-
-    processMemberQueue(
-      validTeams,
-      dimension,
-      finishQueue,
-      () => totalOk++,
-      () => totalFail++,
-      () => aborted,
-    );
-  }, TELEPORT_CONFIG.LEADER_SETTLE_TICKS);
+  processNextLeader();
 }
 
 function processMemberQueue(validTeams, dimension, finishCallback, onSuccess, onFail, isAborted) {
@@ -809,6 +833,7 @@ export function endGameUhc() {
 }
 
 function cleanupGameState() {
+  abortAllTeleportQueues();
   fillReset();
   endSequenceReset();
   scoreboardClear();
@@ -877,3 +902,20 @@ function restoreWorldDefaults(prevShowCoordinates) {
   world.gameRules.pvp = false;
   world.gameRules.showCoordinates = prevShowCoordinates;
 }
+
+// ======================================================
+// Auto Pause Game Loop on Empty Server (ลดโหลดจากการ Polling)
+// ======================================================
+world.afterEvents.playerLeave.subscribe(() => {
+  system.run(() => {
+    if (ctx.isRunning && world.getPlayers().length === 0) {
+      stopGameLoop();
+    }
+  });
+});
+
+world.afterEvents.playerSpawn.subscribe(() => {
+  if (ctx.isRunning && ctx.checkInterval === null) {
+    gameLoopRun();
+  }
+});
