@@ -43,11 +43,54 @@ let cachedPlayerText = "";
 let cachedTeamText = "";
 let cachedDeathsText = "";
 
-// ======================================================
-//
-//              UTILITY FUNCTIONS
-//
-// ======================================================
+// ฟังก์ชันสำหรับบังคับรีเฟรชข้อมูลทีม
+function forceRefreshTeamData() {
+  console.warn("[DEBUG] forceRefreshTeamData - Clearing cache");
+  lastTeamHash = "";
+  cachedTeamText = "";
+  lastStatsHash = "";
+  cachedPlayerText = "";
+  cachedDeathsText = "";
+}
+
+// ฟังก์ชันสำหรับแสดงทีมทั้งหมดแม้ไม่มี kill
+function getAllTeamsForDisplay() {
+  console.warn("[DEBUG] getAllTeamsForDisplay - Getting all teams regardless of kills");
+  
+  const allTeams = getTeams();
+  const teamList = [];
+  
+  if (!allTeams || !allTeams.length) {
+    console.warn("[DEBUG] getAllTeamsForDisplay - No teams found in system");
+    return teamList;
+  }
+
+  for (let i = 0; i < allTeams.length; i++) {
+    const teamInfo = allTeams[i];
+    const memberCount = getPlayersByTeam(teamInfo.id).length;
+    
+    // แสดงทีมทั้งหมดแม้ไม่มี kill
+    const teamData = {
+      name: teamInfo.color + teamInfo.name,
+      kills: 0, // เริ่มต้นด้วย 0
+      members: memberCount,
+      order: i,
+    };
+    
+    console.warn(`[DEBUG] getAllTeamsForDisplay - Team ${i}: "${teamData.name}" members=${memberCount}`);
+    teamList.push(teamData);
+  }
+
+  // เรียงตามลำดับทีม
+  teamList.sort((a, b) => a.order - b.order);
+
+  if (teamList.length > MAX_TEAMS) {
+    teamList.length = MAX_TEAMS;
+  }
+  
+  console.warn("[DEBUG] getAllTeamsForDisplay - Returning", teamList.length, "teams");
+  return teamList;
+}
 // getRankColor (คืนค่าสีตามอันดับที่กำหนด)
 // ======================================================
 function getRankColor(index) {
@@ -303,29 +346,40 @@ function getPlayerText(playerStatsMap) {
 // buildEmptyTeamText (สร้างข้อความกรณีไม่มีข้อมูลทีมในตาราง)
 // ======================================================
 function buildEmptyTeamText() {
-  return `§bTop ${MAX_TEAMS} Teams (Kills)\n\n§7None (0)\n`;
+  console.warn("[DEBUG] buildEmptyTeamText - Showing fallback message");
+  return `§bTop ${MAX_TEAMS} Teams (Kills)\n\n§7No team data available\n§7Check if teams are created and players are assigned\n`;
 }
 
 // ======================================================
 // buildTeamText (จัดรูปแบบข้อความตารางคะแนนทีม)
 // ======================================================
 function buildTeamText(teamList) {
-  if (!teamList.length) return buildEmptyTeamText();
+  console.warn("[DEBUG] buildTeamText - Input team list:", teamList);
+  
+  if (!teamList || !teamList.length) {
+    console.warn("[DEBUG] buildTeamText - No teams, returning empty text");
+    return buildEmptyTeamText();
+  }
 
   let teamLeaderboardText = `§bTop ${MAX_TEAMS} Teams (Kills)\n\n`;
+  
   for (let i = 0; i < teamList.length; i++) {
+    const team = teamList[i];
+    console.warn(`[DEBUG] buildTeamText - Team ${i + 1}: "${team.name}" kills=${team.kills} members=${team.members}`);
+    
     const rankColor = getRankColor(i);
 
     let memberCount;
-    if (teamList[i].members !== undefined) {
-      memberCount = teamList[i].members;
+    if (team.members !== undefined) {
+      memberCount = team.members;
     } else {
       memberCount = 0;
     }
 
-    teamLeaderboardText += `${rankColor}#${i + 1} ${teamList[i].name} §f: §c${teamList[i].kills} Kills §7(${memberCount} Players)\n`;
+    teamLeaderboardText += `${rankColor}#${i + 1} ${team.name} §f: §c${team.kills} Kills §7(${memberCount} Players)\n`;
   }
 
+  console.warn("[DEBUG] buildTeamText - Final text length:", teamLeaderboardText.length);
   return teamLeaderboardText;
 }
 
@@ -409,10 +463,21 @@ function getObjectiveTeamList(teamKillObjective) {
 // getRuntimeTeamList (ดึงข้อมูลทีมจากหน่วยความจำกรณีไม่มี Scoreboard)
 // ======================================================
 function getRuntimeTeamList() {
+  console.warn("[DEBUG] getRuntimeTeamList - Starting");
+  
   const allTeams = getTeams();
   const teamStatsMap = getTeamStats();
   const teamList = [];
-  if (!allTeams || !allTeams.length) return teamList;
+  
+  console.warn("[DEBUG] getRuntimeTeamList - All teams count:", allTeams ? allTeams.length : 0);
+  console.warn("[DEBUG] getRuntimeTeamList - Team stats map size:", teamStatsMap ? teamStatsMap.size : 0);
+  
+  if (!allTeams || !allTeams.length) {
+    console.warn("[DEBUG] getRuntimeTeamList - No teams found");
+    return teamList;
+  }
+
+  let hasAnyKills = false;
 
   for (let i = 0; i < allTeams.length; i++) {
     const teamInfo = allTeams[i];
@@ -429,29 +494,42 @@ function getRuntimeTeamList() {
     let killCount;
     if (teamStats && teamStats.kills !== undefined) {
       killCount = teamStats.kills;
+      if (killCount > 0) hasAnyKills = true;
     } else {
       killCount = 0;
     }
 
-    teamList.push({
+    const teamData = {
       name: teamInfo.color + teamInfo.name,
       kills: killCount,
       members: memberCount,
       order: i,
-    });
+    };
+    
+    console.warn(`[DEBUG] getRuntimeTeamList - Team ${i}: "${teamData.name}" kills=${killCount} members=${memberCount}`);
+    teamList.push(teamData);
   }
 
-  teamList.sort((a, b) => {
-    if (b.kills !== a.kills) {
-      return b.kills - a.kills;
-    } else {
-      return a.order - b.order;
-    }
-  });
+  // ถ้าไม่มีทีมไหนมี kill เลย ให้แสดงทีมทั้งหมดแบบเรียงตามลำดับ
+  if (!hasAnyKills) {
+    console.warn("[DEBUG] getRuntimeTeamList - No kills found, showing all teams by order");
+    teamList.sort((a, b) => a.order - b.order);
+  } else {
+    // เรียงตามจำนวน kill
+    teamList.sort((a, b) => {
+      if (b.kills !== a.kills) {
+        return b.kills - a.kills;
+      } else {
+        return a.order - b.order;
+      }
+    });
+  }
 
   if (teamList.length > MAX_TEAMS) {
     teamList.length = MAX_TEAMS;
   }
+  
+  console.warn("[DEBUG] getRuntimeTeamList - Final sorted list length:", teamList.length);
   return teamList;
 }
 
@@ -462,14 +540,21 @@ function getTeamText() {
   const teamKillObjective = getTeamKillObjective();
   let teamList = [];
 
+  console.warn("[DEBUG] getTeamText - teamKillObjective exists:", !!teamKillObjective);
+
   if (teamKillObjective) {
     const objectiveTeamList = getObjectiveTeamList(teamKillObjective);
+    console.warn("[DEBUG] getTeamText - objectiveTeamList length:", objectiveTeamList.length);
+    
     if (objectiveTeamList.length) {
       teamList = objectiveTeamList;
+      console.warn("[DEBUG] getTeamText - Using objective team list");
     } else {
+      console.warn("[DEBUG] getTeamText - Objective has no data, falling back to runtime list");
       teamList = getRuntimeTeamList();
     }
   } else {
+    console.warn("[DEBUG] getTeamText - No objective found, using runtime list");
     teamList = getRuntimeTeamList();
   }
 
@@ -480,8 +565,12 @@ function getTeamText() {
     teamHash += `${team.name}${team.kills}${team.members}${team.order}`;
   }
 
+  console.warn("[DEBUG] getTeamText - Final team list length:", teamList.length);
+  console.warn("[DEBUG] getTeamText - Team hash:", teamHash);
+
   // ตรวจสอบว่าข้อมูลเปลี่ยนแปลงหรือไม่
   if (teamHash === lastTeamHash && cachedTeamText) {
+    console.warn("[DEBUG] getTeamText - Using cached text");
     return cachedTeamText;
   }
 
@@ -489,6 +578,7 @@ function getTeamText() {
   cachedTeamText = buildTeamText(teamList);
   lastTeamHash = teamHash;
 
+  console.warn("[DEBUG] getTeamText - Generated new text, length:", cachedTeamText.length);
   return cachedTeamText;
 }
 
@@ -734,6 +824,9 @@ export function updateLeaderboard() {
 export function spawnLeaderboardNPC() {
   system.runTimeout(spawnLeaderboardNPCNow, 20);
 }
+
+// Export ฟังก์ชันสำหรับการ debug และรีเฟรช
+export { forceRefreshTeamData, getAllTeamsForDisplay };
 
 system.run(renderBoard);
 

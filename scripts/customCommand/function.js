@@ -184,6 +184,7 @@ function uhcReset() {
 
   spawnLeaderboardNPC();
   updateLeaderboard();
+  cmd("effect @a clear");
 }
 
 function uhcStart() {

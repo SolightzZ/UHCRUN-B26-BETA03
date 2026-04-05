@@ -66,6 +66,7 @@ export function playerSetupApplyStartState(player) {
       const [effect, duration] = UHC_PLAYER_EFFECTS[i];
       player.addEffect(effect, duration, effectOptionsHidden);
       player.addEffect("conduit_power", 5000, { amplifier: 0, showParticles: false });
+      player.addEffect("absorption", 5000, { amplifier: 50, showParticles: false });
     }
     return;
   }
